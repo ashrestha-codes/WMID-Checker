@@ -37,4 +37,11 @@ if [ ! -d .venv ]; then
 fi
 
 # ---------- 3. Start ----------
+# Stop any older copy of the tool that is still running on the same port
+OLD_PIDS="$(lsof -ti tcp:5050 2>/dev/null)"
+if [ -n "$OLD_PIDS" ]; then
+  echo "Closing an older copy of the tool that was still running..."
+  kill $OLD_PIDS 2>/dev/null; sleep 2
+  OLD_PIDS="$(lsof -ti tcp:5050 2>/dev/null)"; [ -n "$OLD_PIDS" ] && kill -9 $OLD_PIDS 2>/dev/null
+fi
 .venv/bin/python app.py

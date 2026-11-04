@@ -144,7 +144,7 @@ async function poll(){
   if(s.running) timer = setTimeout(poll, 1500);
 }
 renderSites(); poll();
-fetch('/api/version').then(r=>r.text()).then(v=>$('ver').textContent='v'+v).catch(()=>{});
+fetch('/api/version').then(r=>r.ok?r.text():Promise.reject()).then(v=>$('ver').textContent='v'+v).catch(()=>{});
 </script>
 </body>
 </html>
