@@ -42,7 +42,9 @@ The **Journey** column shows `google-click` (the real Google journey) or `direct
     python checker.py sites.csv --out results.csv [--cookie-name trackerID] [--wait 8] [--google https://www.google.ca] [--headless]
 
 ## Updates
-The tool updates itself. Every time you open `start-mac.command`, it downloads the latest version from
+**In the tool:** when a new version is out, a blue "New version available" bar appears at the top. Click **Update now** and the tool downloads it and restarts itself in about 10 seconds. You can also click **Check for updates** at any time.
+
+**On start:** every time you open `start-mac.command`, it also downloads the latest version from
 github.com/ashrestha-codes/WMID-Checker before starting. Your `results/` and `screenshots/` folders are never touched.
 The version number is shown next to the title on the page.
 To change the update source, edit `update_source.txt` (format: `owner/repo`). Leave it empty to turn updates off.

@@ -181,6 +181,7 @@ def _restart():
     import time
     time.sleep(1.0)
     os.environ["NO_BROWSER"] = "1"  # the page is already open; it reloads itself
+    os.closerange(3, 4096)          # release the web server's port so the new copy can use it
     os.execv(sys.executable, [sys.executable, os.path.join(BASE, "app.py")])
 
 
