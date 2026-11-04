@@ -11,10 +11,13 @@ if [ -n "$REPO" ]; then
      && unzip -q "$TMP/u.zip" -d "$TMP" ; then
     SRC="$(find "$TMP" -mindepth 1 -maxdepth 1 -type d | head -1)"
     OLD_REQ="$(cat requirements.txt 2>/dev/null)"
-    # copy code only — never touches your results, screenshots or installed packages
-    rsync -a --exclude results --exclude screenshots --exclude .venv --exclude update_source.txt "$SRC"/ ./
-    chmod +x start-mac.command
-    echo "Up to date (version: $(cat VERSION 2>/dev/null || echo unknown))."
+    # copy code only — the download never contains your results, screenshots or installed packages
+    if cp -R "$SRC"/. ./ ; then
+      chmod +x start-mac.command
+      echo "Up to date (version: $(cat VERSION 2>/dev/null || echo unknown))."
+    else
+      echo "Update copy failed. Starting the current version."
+    fi
     if [ -d .venv ] && [ "$OLD_REQ" != "$(cat requirements.txt)" ]; then
       echo "Installing new requirements..."
       .venv/bin/pip install -q -r requirements.txt
