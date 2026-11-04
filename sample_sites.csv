@@ -1,0 +1,3 @@
+brand,url,expected_id,search_query
+Sports Interaction,https://www.sportsinteraction.com,REPLACE-WITH-CORRECT-ID,Sports Interaction
+Example Brand,https://www.example.com,ABC-12345,
