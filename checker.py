@@ -81,7 +81,8 @@ class Result:
     status: str = "PENDING"         # MATCH | MISMATCH | NOT_FOUND | NOT_IN_SERP | CAPTCHA | ERROR
     actual_id: str = ""
     cookie_domain: str = ""
-    other_values: str = ""          # other cookies/storage entries with the same name
+    tracker_count: int = 0          # how many different tracker IDs the site set (trackerID, trackerId2 …)
+    all_tracker_ids: str = ""       # e.g. "trackerID=ABC; trackerId2=XYZ"
     journey: str = ""               # google-click | direct-fallback
     serp_position: str = ""
     landing_url: str = ""
@@ -269,22 +270,28 @@ def _find_serp_result(page, domain: str):
     return None, None, None
 
 
+def _tracker_name_re(cookie_name: str):
+    """trackerID, trackerId2, trackerID_2, trackerid-3 … (any case)."""
+    return re.compile(r"^" + re.escape(cookie_name) + r"(?:[_-]?\d+)?$", re.I)
+
+
 def _collect_tracker_values(context, page, cookie_name: str) -> list[dict]:
-    """Everything named cookie_name: cookies on any domain + localStorage/sessionStorage."""
-    target = cookie_name.lower()
+    """Every tracker-ID entry (cookie_name plus numbered variants): cookies on any domain
+    + localStorage/sessionStorage."""
+    name_re = _tracker_name_re(cookie_name)
     found = []
     for c in context.cookies():
-        if c["name"].lower() == target:
+        if name_re.match(c["name"]):
             found.append({"source": "cookie", "domain": c["domain"], "value": c["value"],
                           "exact_name": c["name"]})
     try:
         storage = page.evaluate(
-            """(n) => { const out = [];
+            """(pat) => { const re = new RegExp(pat, 'i'); const out = [];
                 for (const [label, s] of [['localStorage', localStorage], ['sessionStorage', sessionStorage]]) {
                   try { for (let i = 0; i < s.length; i++) { const k = s.key(i);
-                        if (k.toLowerCase() === n) out.push({source: label, key: k, value: s.getItem(k)}); } }
+                        if (re.test(k)) out.push({source: label, key: k, value: s.getItem(k)}); } }
                   catch (e) {} }
-                return out; }""", target)
+                return out; }""", name_re.pattern)
         for s in storage:
             found.append({"source": s["source"], "domain": urlparse(page.url).hostname,
                           "value": s["value"], "exact_name": s["key"]})
@@ -434,6 +441,9 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
             if found or time.time() >= deadline:
                 break
             page.wait_for_timeout(1000)
+        if found:  # a second tracker (trackerId2 …) is often set a moment later
+            page.wait_for_timeout(2500)
+            found = _collect_tracker_values(context, page, s.cookie_name) or found
 
         # ---- 5. Compare ----------------------------------------------------------
         prev_status = r.status
@@ -448,10 +458,17 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
             match = next((f for f in found if _norm_value(f["value"], s.case_sensitive_match) == exp), None)
             best = match or found[0]
             r.actual_id = unquote(best["value"])
-            r.cookie_domain = f'{best["domain"]} ({best["source"]})'
-            others = [f'{f["source"]}@{f["domain"]}={unquote(f["value"])}' for f in found if f is not best]
-            r.other_values = "; ".join(others)
+            r.cookie_domain = f'{best["exact_name"]} on {best["domain"]} ({best["source"]})'
+            # unique tracker IDs by name + value (the same cookie can appear on several domains)
+            uniq = {}
+            for f in found:
+                uniq.setdefault((f["exact_name"].lower(), unquote(f["value"])), f)
+            ordered = sorted(uniq.values(), key=lambda f: (f is not best, f["exact_name"].lower()))
+            r.tracker_count = len(uniq)
+            r.all_tracker_ids = "; ".join(f'{f["exact_name"]}={unquote(f["value"])}' for f in ordered)
             r.status = "MATCH" if match else "MISMATCH"
+            if r.tracker_count > 1:
+                r.note = (r.note + " " if r.note else "") + f"{r.tracker_count} tracker IDs found."
             if not site.expected_id:
                 r.status, r.note = "NO_EXPECTED_ID", "Found a value but no expected ID was given."
         if prev_status == "CAPTCHA":

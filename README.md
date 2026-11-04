@@ -35,10 +35,12 @@ The first run installs everything. After that it opens http://127.0.0.1:5050 in 
 * Use the moon/sun button in the top bar to switch between light and dark mode.
 
 ## Statuses
+When a site sets more than one tracker ID, the result shows a **“2 IDs”** tag and lists every name and value. The one that matches is shown in green.
+
 | Status | Meaning |
 |---|---|
-| MATCH | `trackerID` found and equals the correct ID |
-| MISMATCH | `trackerID` found but the value is different (shown under "Actual") |
+| MATCH | The correct ID is in `trackerID` or in a numbered one (`trackerId2`, `trackerID_3` …) |
+| MISMATCH | Tracker IDs were found, but none equals the correct ID (all are shown under "Actual") |
 | NOT FOUND | Page loaded but no `trackerID` cookie appeared within the wait time |
 | NOT IN SERP | The site wasn't on page 1 of Google for that search (it's then checked directly if fallback is on) |
 | CAPTCHA | Google blocked the search. In the visible browser you get 90s to solve it |
