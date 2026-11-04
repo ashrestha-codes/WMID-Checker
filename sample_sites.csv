@@ -1,3 +1,4 @@
-brand,url,expected_id,search_query
-Sports Interaction,https://www.sportsinteraction.com,REPLACE-WITH-CORRECT-ID,Sports Interaction
-Example Brand,https://www.example.com,ABC-12345,
+url,expected_id
+https://www.sportsinteraction.com/en-ca/sports,REPLACE-WITH-CORRECT-ID
+https://www.on.sportsinteraction.com/en-CA/Sports,REPLACE-WITH-CORRECT-ID
+https://www.partycasino.com/en-ca/games,REPLACE-WITH-CORRECT-ID

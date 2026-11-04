@@ -11,7 +11,8 @@ from datetime import datetime
 
 from flask import Flask, Response, jsonify, request, send_from_directory
 
-from checker import Settings, parse_sites, results_to_csv, run_checks
+from checker import Settings, Site, parse_sites, results_to_csv, run_checks
+from query_builder import describe_url, parse_directory_terms
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SHOTS = os.path.join(BASE, "screenshots")
@@ -53,8 +54,21 @@ def api_parse():
     f = request.files.get("file")
     if f and f.filename:
         text = f.read().decode("utf-8-sig", errors="replace")
-    sites = parse_sites(text)
-    return jsonify([{**asdict(s), "domain": s.domain} for s in sites])
+    terms = parse_directory_terms(request.form.get("directory_terms"))
+    rows = []
+    for s in parse_sites(text, terms):
+        auto = describe_url(s.url, terms)["query"]
+        rows.append({"url": s.url, "expected_id": s.expected_id, "search_query": s.query,
+                     "auto": s.query == auto})
+    return jsonify(rows)
+
+
+@app.post("/api/queries")
+def api_queries():
+    """Generated Google search for each URL (used to preview queries in the site list)."""
+    data = request.get_json(force=True)
+    terms = parse_directory_terms(data.get("directory_terms"))
+    return jsonify([describe_url(u, terms)["query"] if u.strip() else "" for u in data.get("urls", [])])
 
 
 @app.post("/api/run")
@@ -62,13 +76,14 @@ def api_run():
     if state["running"]:
         return jsonify(error="A run is already in progress."), 409
     data = request.get_json(force=True)
-    sites = parse_sites("brand,url,expected_id,search_query\n" + "\n".join(
-        ",".join('"' + str(x.get(k, "")).replace('"', '""') + '"'
-                 for k in ("brand", "url", "expected_id", "search_query"))
-        for x in data.get("sites", [])))
+    o = data.get("settings", {})
+    terms = parse_directory_terms(o.get("directory_terms"))
+    sites = [Site(url=x["url"].strip(), expected_id=str(x.get("expected_id", "")).strip(),
+                  search_query="" if x.get("auto", True) else str(x.get("search_query", "")),
+                  directory_terms=terms)
+             for x in data.get("sites", []) if str(x.get("url", "")).strip()]
     if not sites:
         return jsonify(error="No sites to check."), 400
-    o = data.get("settings", {})
     settings = Settings(
         cookie_name=o.get("cookie_name") or "trackerID",
         wait_seconds=int(o.get("wait_seconds") or 8),

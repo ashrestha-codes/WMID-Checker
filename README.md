@@ -19,12 +19,20 @@ Google Chrome is optional. If you have it, the tool uses it, otherwise it uses i
 The first run installs everything. After that it opens http://127.0.0.1:5050 in your browser.
 
 ## Using it
-* **Upload a CSV** or **paste rows** (copied from Excel/Sheets works). Columns:
-  `brand, url, expected_id, search_query` (`search_query` is optional, and the brand is used when it's blank).
-  Header names are flexible ("Website", "Correct ID", "Tracker ID" all work). See `sample_sites.csv`.
-* You can edit rows in the table. The list is remembered in your browser.
+* **Upload a CSV** or **paste rows** (copied from Excel/Sheets works). You only need two columns:
+  `url, expected_id`. See `sample_sites.csv`.
+* The **Google search is generated from the URL**: brand words from the domain, then the location, then the
+  page section. Words already in the brand are dropped.
+  * Location, in priority order: regional sub-domain (`on.` = ontario, `ab.` = alberta, `nj.` = new jersey …),
+    then country domain (`.es` = spain, `.ca` = canada …), then the language code in the path
+    (`en-ca` = canada, `en` = UK, `fr` = french …).
+  * Section words are set in **Settings → Directory search words** (`sports = sports betting`, `games = online casino games`, `promo = promos`).
+  * Example: `https://www.on.sportsinteraction.com/en-CA/Sports` → `sports interaction ontario betting`.
+  * You can still edit a search in the list. It then shows **edited**, and you click it to go back to the generated one.
+* Each URL is also requested directly, and its **HTTP status** (200, 301, 404 …) and **redirect target** are shown under the site in the results.
 * Click **Run check**. A Chrome window opens and does the journey. Leave it alone while it runs.
-* **Download results CSV** when done. Screenshots of each landing page are saved in `screenshots/`, and each run's CSV is saved in `results/`.
+* **Download CSV** when done. Screenshots are saved in `screenshots/`, and each run's CSV is saved in `results/`.
+* Use the moon/sun button in the top bar to switch between light and dark mode.
 
 ## Statuses
 | Status | Meaning |

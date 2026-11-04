@@ -4,166 +4,476 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tracker ID Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>
+  // apply saved theme before paint
+  try { const t = localStorage.getItem('tc_theme'); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
 <style>
-  :root{--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mute:#6a7180;--line:#e3e6eb;--accent:#1f5eff;
-        --ok:#0f8a4b;--okbg:#e5f6ed;--bad:#c62828;--badbg:#fdeaea;--warn:#a56300;--warnbg:#fff3df;--grey:#eef0f3}
-  *{box-sizing:border-box} body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  header{padding:20px 28px 8px} h1{font-size:20px;margin:0} header p{margin:4px 0 0;color:var(--mute)}
-  main{display:grid;gap:16px;padding:12px 28px 40px;max-width:1400px}
-  .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px}
-  .card h2{font-size:14px;margin:0 0 12px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-  button,.btn{border:1px solid var(--line);background:#fff;border-radius:7px;padding:7px 12px;font:inherit;cursor:pointer;color:var(--ink);text-decoration:none}
-  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)} button:disabled{opacity:.5;cursor:default}
-  button.danger{color:var(--bad)}
-  textarea{width:100%;min-height:90px;font:12.5px ui-monospace,Menlo,Consolas,monospace;border:1px solid var(--line);border-radius:7px;padding:8px}
-  input[type=text],input[type=number]{border:1px solid var(--line);border-radius:6px;padding:6px 8px;font:inherit;width:100%}
-  table{width:100%;border-collapse:collapse} th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-  th{font-size:12px;color:var(--mute);font-weight:600} td input{min-width:120px}
-  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px} @media(max-width:900px){.grid2{grid-template-columns:1fr}}
-  .settings{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
-  .settings label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--mute)}
-  .settings label.chk{flex-direction:row;align-items:center;gap:8px;color:var(--ink)}
-  .pill{display:inline-block;padding:2px 8px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
-  .MATCH{background:var(--okbg);color:var(--ok)} .MISMATCH,.ERROR{background:var(--badbg);color:var(--bad)}
-  .NOT_FOUND,.NOT_IN_SERP,.CAPTCHA,.NO_EXPECTED_ID{background:var(--warnbg);color:var(--warn)} .PENDING{background:var(--grey);color:var(--mute)}
-  .stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
-  .stat{border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:110px} .stat b{display:block;font-size:20px}
-  #log{background:#0f1115;color:#cfd6e4;font:12px ui-monospace,Menlo,Consolas,monospace;border-radius:8px;padding:10px;height:220px;overflow:auto;white-space:pre-wrap}
-  .mute{color:var(--mute)} code{background:var(--grey);padding:1px 5px;border-radius:4px}
-  .small{font-size:12px} td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px;word-break:break-all}
-  .bar{height:6px;background:var(--grey);border-radius:99px;overflow:hidden;margin:6px 0 12px}.bar>div{height:100%;background:var(--accent);width:0}
-  #upd{display:none;margin:10px 28px 0;max-width:1344px;background:#eef3ff;border:1px solid #c9d8ff;border-radius:10px;padding:10px 14px;align-items:center;gap:12px;flex-wrap:wrap}
+  :root{
+    --canvas:#F3F5F8; --surface:#FFFFFF; --raised:#F8FAFC; --ink:#0F1829; --ink-2:#334155; --muted:#64748B;
+    --line:#E2E8F0; --line-2:#CBD5E1; --accent:#0F766E; --accent-ink:#FFFFFF; --accent-soft:#E6F4F2;
+    --ok:#15803D; --ok-soft:#E8F6EC; --bad:#C2261F; --bad-soft:#FDECEA; --warn:#B25E09; --warn-soft:#FDF3E3;
+    --idle:#CBD5E1; --shadow:0 1px 2px rgba(15,24,41,.04), 0 4px 16px rgba(15,24,41,.05);
+    --focus:0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent);
+    --sans:"Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono:"Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    color-scheme:light;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --canvas:#0A0F1A; --surface:#111827; --raised:#162033; --ink:#E6EBF2; --ink-2:#C3CCD9; --muted:#8B97AA;
+      --line:#1F2A3D; --line-2:#2C3A52; --accent:#2BC4AE; --accent-ink:#04201C; --accent-soft:#0F2E2B;
+      --ok:#4ADE80; --ok-soft:#10291B; --bad:#F87171; --bad-soft:#2E1517; --warn:#FBBF24; --warn-soft:#2B2210;
+      --idle:#2C3A52; --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25); color-scheme:dark;
+    }
+  }
+  :root[data-theme="dark"]{
+    --canvas:#0A0F1A; --surface:#111827; --raised:#162033; --ink:#E6EBF2; --ink-2:#C3CCD9; --muted:#8B97AA;
+    --line:#1F2A3D; --line-2:#2C3A52; --accent:#2BC4AE; --accent-ink:#04201C; --accent-soft:#0F2E2B;
+    --ok:#4ADE80; --ok-soft:#10291B; --bad:#F87171; --bad-soft:#2E1517; --warn:#FBBF24; --warn-soft:#2B2210;
+    --idle:#2C3A52; --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.25); color-scheme:dark;
+  }
+
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{background:var(--canvas);color:var(--ink);font:14px/1.5 var(--sans);-webkit-font-smoothing:antialiased;
+       transition:background-color .2s ease,color .2s ease}
+  button,input,textarea{font:inherit;color:inherit}
+  :focus-visible{outline:none;box-shadow:var(--focus);border-radius:8px}
+  .mono{font-family:var(--mono);font-size:12.5px;letter-spacing:-.01em}
+  .muted{color:var(--muted)}
+  svg{flex:none}
+
+  /* ---------- top bar ---------- */
+  .top{position:sticky;top:0;z-index:20;background:color-mix(in srgb,var(--surface) 86%,transparent);
+       backdrop-filter:saturate(1.4) blur(10px);border-bottom:1px solid var(--line)}
+  .top-in{max-width:1240px;margin:0 auto;padding:12px 24px;display:flex;align-items:center;gap:14px}
+  .brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px;letter-spacing:-.01em}
+  .mark{width:26px;height:26px;border-radius:7px;background:var(--accent);display:grid;place-items:center;color:var(--accent-ink)}
+  .ver{font:500 11.5px var(--mono);color:var(--muted);background:var(--raised);border:1px solid var(--line);border-radius:99px;padding:1px 8px}
+  .spacer{flex:1}
+
+  /* ---------- buttons ---------- */
+  .btn{display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:8px;border:1px solid var(--line-2);
+       background:var(--surface);color:var(--ink);font-weight:500;font-size:13.5px;cursor:pointer;white-space:nowrap;text-decoration:none;
+       transition:background-color .15s,border-color .15s,color .15s}
+  .btn:hover{background:var(--raised)}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .btn.primary:hover{filter:brightness(1.06)}
+  .btn.ghost{border-color:transparent;background:transparent;color:var(--ink-2)}
+  .btn.ghost:hover{background:var(--raised)}
+  .btn.icon{width:34px;padding:0;justify-content:center}
+  .btn.lg{height:40px;padding:0 18px;font-size:14px}
+  .link{background:none;border:0;padding:0;color:var(--accent);cursor:pointer;font-weight:500}
+
+  /* ---------- layout ---------- */
+  main{max-width:1240px;margin:0 auto;padding:24px 24px 64px;display:grid;gap:20px}
+  .panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow)}
+  .panel-h{display:flex;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+  .panel-h h2{margin:0;font-size:15px;font-weight:600;letter-spacing:-.01em}
+  .count{font:500 12px var(--mono);color:var(--muted)}
+  .panel-b{padding:16px 20px}
+
+  .hero{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;flex-wrap:wrap;padding:4px 2px 0}
+  .hero h1{margin:0;font-size:26px;line-height:1.2;font-weight:600;letter-spacing:-.025em}
+  .hero p{margin:6px 0 0;color:var(--muted);max-width:62ch}
+
+  /* update banner */
+  #upd{display:none;align-items:center;gap:12px;padding:10px 14px 10px 16px;border-radius:12px;
+       background:var(--accent-soft);border:1px solid color-mix(in srgb,var(--accent) 30%,transparent);color:var(--ink)}
   #upd.show{display:flex} #upd .msg{flex:1}
-  .hdrrow{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+
+  /* composer */
+  .composer{display:flex;gap:10px;align-items:stretch}
+  .composer textarea{flex:1;min-height:44px;height:44px;max-height:200px;resize:vertical;padding:11px 12px;border-radius:10px;
+       border:1px solid var(--line-2);background:var(--raised);font:13px/1.5 var(--mono)}
+  .composer textarea:focus{border-color:var(--accent);box-shadow:var(--focus);outline:none}
+  .hint{margin:8px 2px 0;font-size:12.5px;color:var(--muted)}
+
+  /* tables */
+  .tbl-wrap{overflow-x:auto}
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  th{font-size:12px;font-weight:500;color:var(--muted);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--surface)}
+  td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+  tbody tr:last-child td{border-bottom:0}
+  tbody tr:hover td{background:color-mix(in srgb,var(--raised) 70%,transparent)}
+  th:first-child,td:first-child{padding-left:20px} th:last-child,td:last-child{padding-right:20px}
+  .cell-in{width:100%;border:1px solid transparent;background:transparent;border-radius:7px;padding:6px 8px;margin-left:-8px}
+  .cell-in:hover{border-color:var(--line)}
+  .cell-in:focus{border-color:var(--accent);background:var(--surface);box-shadow:var(--focus);outline:none}
+  .cell-in.mono{font-family:var(--mono)}
+  .q{display:flex;align-items:center;gap:6px}
+  .tag{font:500 10.5px var(--sans);padding:1px 6px;border-radius:5px;background:var(--raised);border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .tag.edited{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 30%,transparent);background:var(--warn-soft)}
+  .empty{padding:36px 20px;text-align:center;color:var(--muted)}
+  .empty b{display:block;color:var(--ink);font-weight:500;margin-bottom:4px}
+  .nowrap{white-space:nowrap}
+
+  /* run bar */
+  .runbar{display:flex;align-items:center;gap:10px;padding:14px 20px;border-top:1px solid var(--line);background:var(--raised);border-radius:0 0 14px 14px;flex-wrap:wrap}
+  .runbar .status{margin-left:auto;color:var(--muted);font-size:13px}
+
+  /* results: verification strip */
+  .strip{display:flex;gap:3px;height:10px;margin:2px 0 14px}
+  .strip i{flex:1;border-radius:3px;background:var(--idle);transition:background-color .35s ease}
+  .strip i.MATCH{background:var(--ok)} .strip i.MISMATCH,.strip i.ERROR{background:var(--bad)}
+  .strip i.NOT_FOUND,.strip i.NOT_IN_SERP,.strip i.CAPTCHA,.strip i.NO_EXPECTED_ID{background:var(--warn)}
+  .strip i.active{background:var(--accent);animation:pulse 1.1s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){.strip i.active{animation:none}}
+  .summary{display:flex;gap:22px;flex-wrap:wrap;align-items:baseline}
+  .sum{display:flex;align-items:baseline;gap:7px;font-size:13px;color:var(--muted)}
+  .sum b{font:600 22px var(--sans);letter-spacing:-.02em;color:var(--ink)}
+  .dot{width:8px;height:8px;border-radius:50%;display:inline-block;transform:translateY(-2px)}
+
+  .pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:99px;font-size:12px;font-weight:500;white-space:nowrap}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .MATCH.pill{background:var(--ok-soft);color:var(--ok)}
+  .MISMATCH.pill,.ERROR.pill{background:var(--bad-soft);color:var(--bad)}
+  .NOT_FOUND.pill,.NOT_IN_SERP.pill,.CAPTCHA.pill,.NO_EXPECTED_ID.pill{background:var(--warn-soft);color:var(--warn)}
+
+  .site{display:flex;flex-direction:column;gap:3px;min-width:220px}
+  .site a{color:var(--ink);text-decoration:none;font-weight:500;white-space:nowrap}
+  .site a:hover{text-decoration:underline}
+  .http{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);white-space:nowrap;max-width:360px;overflow:hidden;text-overflow:ellipsis}
+  .code{font:500 11px var(--mono);padding:0 5px;border-radius:4px;background:var(--raised);border:1px solid var(--line);color:var(--ink-2)}
+  .code.c3{color:var(--warn)} .code.c4,.code.c5{color:var(--bad)}
+  .id{font-family:var(--mono);font-size:12.5px;white-space:nowrap}
+  .id.bad{color:var(--bad)} .id.ok{color:var(--ok)}
+  .actions{display:flex;gap:2px;justify-content:flex-end}
+  .note{font-size:12px;color:var(--muted);max-width:280px}
+
+  details.log{border-top:1px solid var(--line)}
+  details.log summary{list-style:none;cursor:pointer;padding:12px 20px;color:var(--muted);font-size:13px;display:flex;align-items:center;gap:8px}
+  details.log summary::-webkit-details-marker{display:none}
+  details.log[open] summary svg{transform:rotate(90deg)}
+  #log{margin:0 20px 18px;background:var(--raised);border:1px solid var(--line);color:var(--ink-2);font:12px/1.6 var(--mono);border-radius:10px;padding:12px 14px;max-height:260px;overflow:auto;white-space:pre-wrap}
+
+  /* settings drawer */
+  .scrim{position:fixed;inset:0;background:rgba(5,10,20,.35);opacity:0;pointer-events:none;transition:opacity .2s;z-index:40}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(420px,100%);background:var(--surface);border-left:1px solid var(--line);
+          z-index:41;transform:translateX(100%);transition:transform .25s ease;display:flex;flex-direction:column;box-shadow:var(--shadow)}
+  body.settings .scrim{opacity:1;pointer-events:auto} body.settings .drawer{transform:none}
+  @media (prefers-reduced-motion:reduce){.drawer,.scrim{transition:none}}
+  .drawer-h{display:flex;align-items:center;padding:16px 20px;border-bottom:1px solid var(--line)}
+  .drawer-h h3{margin:0;font-size:15px;font-weight:600}
+  .drawer-b{padding:18px 20px;overflow:auto;display:grid;gap:18px}
+  .field{display:grid;gap:6px}
+  .field > span{font-size:13px;font-weight:500}
+  .field small{color:var(--muted);font-size:12px}
+  .field input[type=text],.field input[type=number],.field textarea{border:1px solid var(--line-2);background:var(--raised);border-radius:8px;padding:8px 10px}
+  .field textarea{min-height:96px;font:12.5px/1.6 var(--mono);resize:vertical}
+  .field input:focus,.field textarea:focus{border-color:var(--accent);box-shadow:var(--focus);outline:none}
+  .toggle{display:flex;align-items:flex-start;gap:12px;cursor:pointer}
+  .toggle input{appearance:none;width:34px;height:20px;border-radius:99px;background:var(--line-2);position:relative;flex:none;cursor:pointer;margin:1px 0 0;transition:background-color .15s}
+  .toggle input::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 2px rgba(0,0,0,.2)}
+  .toggle input:checked{background:var(--accent)} .toggle input:checked::after{transform:translateX(14px)}
+  .toggle b{display:block;font-weight:500;font-size:13px} .toggle small{color:var(--muted);font-size:12px}
+
+  .toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,20px);opacity:0;background:var(--ink);color:var(--canvas);
+         padding:9px 14px;border-radius:9px;font-size:13px;transition:all .2s;z-index:60;pointer-events:none}
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  @media (max-width:720px){
+    .top-in,main{padding-left:16px;padding-right:16px}
+    .hide-sm{display:none}
+    .composer{flex-direction:column}
+    .hero h1{font-size:22px}
+  }
 </style>
 </head>
 <body>
-<header>
- <div class="hdrrow"><div>
-  <h1>Tracker ID Checker <span id="ver" class="small mute" style="font-weight:400"></span></h1>
-  <p>Searches Google for each brand, clicks the site in the results, then reads the <code id="cnHdr">trackerID</code> cookie and compares it with the correct ID.</p>
- </div>
- <div class="row"><span id="updState" class="small mute"></span><button id="checkUpd">Check for updates</button></div>
- </div>
+<header class="top">
+  <div class="top-in">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.5"/><path d="m8.5 11 1.8 1.8 3.4-3.6"/><path d="m16 16 4.5 4.5"/></svg>
+      </span>
+      Tracker ID Checker <span class="ver" id="ver"></span>
+    </div>
+    <div class="spacer"></div>
+    <span id="updState" class="muted hide-sm" style="font-size:12.5px"></span>
+    <button class="btn ghost" id="checkUpd" title="Check for updates">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+      <span class="hide-sm">Check for updates</span>
+    </button>
+    <button class="btn ghost" id="openSettings">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+      <span class="hide-sm">Settings</span>
+    </button>
+    <button class="btn icon ghost" id="theme" aria-label="Switch light or dark mode" title="Light / dark mode">
+      <svg id="ic-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z"/></svg>
+      <svg id="ic-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
+  </div>
 </header>
-<div id="upd"><span class="msg" id="updMsg"></span><button id="doUpd" class="primary">Update now</button></div>
+
 <main>
-  <div class="grid2">
-    <section class="card">
-      <h2>1 · Add sites</h2>
-      <div class="row" style="margin-bottom:10px">
-        <label class="btn">Upload CSV <input id="file" type="file" accept=".csv,.txt,.tsv" hidden></label>
-        <a class="btn" href="/sample.csv">Download sample CSV</a>
-      </div>
-      <p class="small mute" style="margin:0 0 6px">…or paste rows (from Excel/Sheets or as text): <code>brand, url, expected_id, search query (optional)</code></p>
-      <textarea id="paste" placeholder="Sports Interaction, sportsinteraction.com, SIA-12345&#10;Brand Two, www.brandtwo.com, ABC-999, brand two casino"></textarea>
-      <div class="row" style="margin-top:8px"><button id="addPaste">Add pasted rows</button><button id="addRow">+ Add empty row</button><button id="clear" class="danger">Clear list</button></div>
-    </section>
-    <section class="card">
-      <h2>2 · Settings</h2>
-      <div class="settings">
-        <label>Cookie name to check<input id="cookie_name" type="text" value="trackerID"></label>
-        <label>Wait for cookie after landing (sec)<input id="wait_seconds" type="number" min="1" max="60" value="8"></label>
-        <label>Google domain<input id="google_domain" type="text" value="https://www.google.com"></label>
-        <label class="chk"><input id="accept_cookie_banner" type="checkbox" checked> Auto-accept site cookie banner</label>
-        <label class="chk"><input id="fallback_direct" type="checkbox" checked> If not clickable in Google, open site directly</label>
-        <label class="chk"><input id="case_sensitive" type="checkbox" checked> Case-sensitive match</label>
-        <label class="chk"><input id="headless" type="checkbox"> Hide browser window (more CAPTCHAs)</label>
-      </div>
-    </section>
+  <div id="upd" role="status">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M12 3v12m0 0 4-4m-4 4-4-4M5 21h14"/></svg>
+    <span class="msg" id="updMsg"></span>
+    <button id="doUpd" class="btn primary">Update now</button>
   </div>
 
-  <section class="card">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Sites to check (<span id="n">0</span>)</h2>
-      <div class="row"><button id="run" class="primary">Run check</button><button id="stop" disabled>Stop</button></div></div>
-    <table style="margin-top:10px"><thead><tr><th>Brand</th><th>Website</th><th>Correct trackerID</th><th>Google search (optional)</th><th></th></tr></thead>
-      <tbody id="sites"></tbody></table>
+  <div class="hero">
+    <div>
+      <h1>Is every site setting the right tracker?</h1>
+      <p>Paste a URL and its correct ID. The checker builds the branded Google search, clicks through from the results, then reads the <span class="mono" id="cnHdr">trackerID</span> cookie.</p>
+    </div>
+  </div>
+
+  <!-- Sites -->
+  <section class="panel">
+    <div class="panel-h">
+      <h2>Sites to check</h2><span class="count" id="n">0</span>
+      <div class="spacer"></div>
+      <label class="btn">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0-4 4m4-4 4 4"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/></svg>
+        Upload CSV <input id="file" type="file" accept=".csv,.txt,.tsv" hidden>
+      </label>
+      <a class="btn ghost hide-sm" href="/sample.csv">Sample CSV</a>
+    </div>
+    <div class="panel-b">
+      <div class="composer">
+        <textarea id="paste" rows="1" spellcheck="false" placeholder="https://www.sportsinteraction.com/en-ca/sports, SIA-12345"></textarea>
+        <button class="btn primary lg" id="addPaste">Add sites</button>
+      </div>
+      <p class="hint">One site per line: <span class="mono">URL, correct ID</span>. Rows copied from Excel or Google Sheets work too. The Google search is generated for you, and you can edit it in the list.</p>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th style="width:36%">URL</th><th style="width:27%">Correct ID</th><th>Google search</th><th style="width:44px"></th></tr></thead>
+        <tbody id="sites"></tbody>
+      </table>
+    </div>
+    <div class="runbar">
+      <button id="run" class="btn primary lg">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 7 4.5Z"/></svg>
+        Run check
+      </button>
+      <button id="stop" class="btn lg" disabled>Stop</button>
+      <button id="clear" class="btn ghost">Clear list</button>
+      <span class="status" id="runStatus"></span>
+    </div>
   </section>
 
-  <section class="card">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">Results</h2>
-      <a class="btn" id="dl" href="/api/results.csv">Download results CSV</a></div>
-    <div class="bar"><div id="prog"></div></div>
-    <div class="stats" id="stats"></div>
-    <div style="overflow:auto"><table><thead><tr><th>Status</th><th>Brand</th><th>Expected</th><th>Actual</th><th>Journey</th><th>Cookie on</th><th>Notes</th><th></th></tr></thead>
-      <tbody id="results"><tr><td colspan="8" class="mute">No results yet.</td></tr></tbody></table></div>
+  <!-- Results -->
+  <section class="panel">
+    <div class="panel-h">
+      <h2>Results</h2><span class="count" id="resWhen"></span>
+      <div class="spacer"></div>
+      <a class="btn" id="dl" href="/api/results.csv">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4-4m-4 4-4-4"/><path d="M5 21h14"/></svg>
+        Download CSV
+      </a>
+    </div>
+    <div class="panel-b" id="sumWrap" style="display:none">
+      <div class="strip" id="strip"></div>
+      <div class="summary" id="summary"></div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Status</th><th>Site</th><th>Expected</th><th>Actual</th><th>Journey</th><th></th></tr></thead>
+        <tbody id="results"><tr><td colspan="6"><div class="empty"><b>No results yet</b>Add sites above and click Run check.</div></td></tr></tbody>
+      </table>
+    </div>
+    <details class="log">
+      <summary><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m9 6 6 6-6 6"/></svg>Activity log</summary>
+      <div id="log">Nothing has run yet.</div>
+    </details>
   </section>
-
-  <section class="card"><h2>Live log</h2><div id="log"></div></section>
 </main>
+
+<!-- Settings drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" aria-label="Settings">
+  <div class="drawer-h"><h3>Settings</h3><div class="spacer"></div><button class="btn icon ghost" id="closeSettings" aria-label="Close settings">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
+  <div class="drawer-b">
+    <label class="field"><span>Cookie name</span><input id="cookie_name" type="text" value="trackerID"><small>The cookie to read. Upper or lower case doesn't matter.</small></label>
+    <label class="field"><span>Directory search words</span>
+      <textarea id="directory_terms" spellcheck="false">sports = sports betting
+games = online casino games
+promo = promos</textarea>
+      <small>Words added to the Google search for each page section. Words already in the brand name are skipped.</small></label>
+    <label class="field"><span>Wait for the cookie (seconds)</span><input id="wait_seconds" type="number" min="1" max="60" value="8"></label>
+    <label class="field"><span>Google address</span><input id="google_domain" type="text" value="https://www.google.com"><small>Use https://www.google.ca for Canadian results.</small></label>
+    <label class="toggle"><input id="accept_cookie_banner" type="checkbox" checked><span><b>Accept cookie banners</b><small>Clicks “Accept” on the site's cookie pop-up so tracking can start.</small></span></label>
+    <label class="toggle"><input id="fallback_direct" type="checkbox" checked><span><b>Open directly if not in Google</b><small>Visits the URL with a Google referrer when it can't be clicked in the results.</small></span></label>
+    <label class="toggle"><input id="case_sensitive" type="checkbox" checked><span><b>Case-sensitive ID match</b><small>Treat “abc” and “ABC” as different IDs.</small></span></label>
+    <label class="toggle"><input id="headless" type="checkbox"><span><b>Hide the browser window</b><small>Runs out of sight, but Google shows more CAPTCHAs.</small></span></label>
+  </div>
+</aside>
+<div class="toast" id="toast"></div>
+
 <script>
-let sites = [];
-try { sites = JSON.parse(localStorage.getItem('tc_sites') || '[]'); } catch (e) {}
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-function save(){ try{ localStorage.setItem('tc_sites', JSON.stringify(sites)); }catch(e){} }
+const store = { get(k, d){ try{ const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); }catch(e){ return d; } },
+                set(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} } };
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(t._h); t._h=setTimeout(()=>t.classList.remove('show'),2200); }
 
-function renderSites(){
+/* ---------- theme ---------- */
+function isDark(){ const t=document.documentElement.dataset.theme; return t ? t==='dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+function paintThemeIcon(){ $('ic-moon').style.display = isDark()?'none':''; $('ic-sun').style.display = isDark()?'':'none'; }
+$('theme').onclick = ()=>{ const next = isDark()?'light':'dark'; document.documentElement.dataset.theme = next;
+  try{ localStorage.setItem('tc_theme', next); }catch(e){} paintThemeIcon(); };
+paintThemeIcon();
+
+/* ---------- settings ---------- */
+const SETTING_IDS = ['cookie_name','wait_seconds','google_domain','directory_terms'];
+const TOGGLE_IDS = ['accept_cookie_banner','fallback_direct','case_sensitive','headless'];
+const saved = store.get('tc_settings', {});
+SETTING_IDS.forEach(k=>{ if(saved[k]!==undefined) $(k).value = saved[k]; });
+TOGGLE_IDS.forEach(k=>{ if(saved[k]!==undefined) $(k).checked = saved[k]; });
+function readSettings(){ const o={}; SETTING_IDS.forEach(k=>o[k]=$(k).value); TOGGLE_IDS.forEach(k=>o[k]=$(k).checked); return o; }
+document.querySelector('.drawer').addEventListener('input', ()=>{
+  store.set('tc_settings', readSettings()); $('cnHdr').textContent = $('cookie_name').value || 'trackerID';
+});
+$('directory_terms').addEventListener('input', debounce(()=>refreshQueries(true), 400));
+$('cnHdr').textContent = $('cookie_name').value || 'trackerID';
+const openS = ()=>document.body.classList.add('settings'), closeS = ()=>document.body.classList.remove('settings');
+$('openSettings').onclick = openS; $('closeSettings').onclick = closeS; $('scrim').onclick = closeS;
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeS(); });
+
+/* ---------- sites ---------- */
+let sites = store.get('tc_sites', []).map(s=>({url:s.url||'', expected_id:s.expected_id||'',
+  search_query:s.search_query||'', auto: s.auto!==undefined ? s.auto : !s.search_query}));
+function save(){ store.set('tc_sites', sites); }
+function debounce(fn, ms){ let h; return (...a)=>{ clearTimeout(h); h=setTimeout(()=>fn(...a), ms); }; }
+
+async function refreshQueries(all){
+  const idx = sites.map((s,i)=>i).filter(i=>sites[i].auto && (all || !sites[i].search_query));
+  if(!idx.length) return;
+  try{
+    const q = await (await fetch('/api/queries',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({urls: idx.map(i=>sites[i].url), directory_terms: $('directory_terms').value})})).json();
+    idx.forEach((i,k)=>{ if(sites[i]) sites[i].search_query = q[k]; });
+    save(); renderSites(true);
+  }catch(e){}
+}
+const refreshOne = debounce(()=>refreshQueries(true), 350);
+
+function renderSites(keepFocus){
   $('n').textContent = sites.length;
-  $('sites').innerHTML = sites.map((s,i)=>`<tr>
-    ${['brand','url','expected_id','search_query'].map(k=>`<td><input type="text" data-i="${i}" data-k="${k}" value="${esc(s[k])}"></td>`).join('')}
-    <td><button data-del="${i}" class="danger">✕</button></td></tr>`).join('') ||
-    '<tr><td colspan="5" class="mute">Upload a CSV or paste rows above.</td></tr>';
+  const active = document.activeElement; const key = active && active.dataset ? active.dataset.k+':'+active.dataset.i : null;
+  const pos = active && active.selectionStart;
+  $('sites').innerHTML = sites.length ? sites.map((s,i)=>`<tr>
+      <td><input class="cell-in" data-i="${i}" data-k="url" value="${esc(s.url)}" placeholder="https://…" spellcheck="false"></td>
+      <td><input class="cell-in mono" data-i="${i}" data-k="expected_id" value="${esc(s.expected_id)}" placeholder="Correct ID" spellcheck="false"></td>
+      <td><div class="q"><input class="cell-in" data-i="${i}" data-k="search_query" value="${esc(s.search_query)}" spellcheck="false">
+        ${s.auto ? '<span class="tag" title="Generated from the URL">auto</span>'
+                 : `<button class="tag edited" data-reset="${i}" title="Go back to the generated search">edited ↺</button>`}</div></td>
+      <td><button class="btn icon ghost" data-del="${i}" aria-label="Remove row" title="Remove">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button></td></tr>`).join('')
+    : `<tr><td colspan="4"><div class="empty"><b>No sites yet</b>Paste URLs and IDs above, or upload a CSV.</div></td></tr>`;
+  if(keepFocus && key){ const el = document.querySelector(`[data-k="${key.split(':')[0]}"][data-i="${key.split(':')[1]}"]`);
+    if(el){ el.focus(); try{ el.setSelectionRange(pos,pos); }catch(e){} } }
   save();
 }
-$('sites').addEventListener('input', e=>{ const t=e.target; if(t.dataset.k){ sites[t.dataset.i][t.dataset.k]=t.value; save(); }});
-$('sites').addEventListener('click', e=>{ if(e.target.dataset.del!==undefined){ sites.splice(+e.target.dataset.del,1); renderSites(); }});
-$('addRow').onclick = ()=>{ sites.push({brand:'',url:'',expected_id:'',search_query:''}); renderSites(); };
-$('clear').onclick = ()=>{ if(confirm('Clear all sites?')){ sites=[]; renderSites(); } };
+$('sites').addEventListener('input', e=>{
+  const t=e.target, i=+t.dataset.i, k=t.dataset.k; if(!k) return;
+  sites[i][k] = t.value;
+  if(k==='search_query'){ if(sites[i].auto){ sites[i].auto=false; renderSites(true); } }
+  if(k==='url' && sites[i].auto) refreshOne();
+  save();
+});
+$('sites').addEventListener('click', e=>{
+  const d = e.target.closest('[data-del]'), r = e.target.closest('[data-reset]');
+  if(d){ sites.splice(+d.dataset.del,1); renderSites(); }
+  if(r){ sites[+r.dataset.reset].auto = true; refreshQueries(true); }
+});
+$('clear').onclick = ()=>{ if(sites.length && confirm('Remove all sites from the list?')){ sites=[]; renderSites(); } };
 
 async function parse(fd){
-  const r = await fetch('/api/parse',{method:'POST',body:fd}); const rows = await r.json();
-  if(!rows.length){ alert('No rows found. Expected columns: brand, url, expected_id'); return; }
-  sites.push(...rows.map(({brand,url,expected_id,search_query})=>({brand,url,expected_id,search_query}))); renderSites();
+  fd.append('directory_terms', $('directory_terms').value);
+  const rows = await (await fetch('/api/parse',{method:'POST',body:fd})).json();
+  if(!rows.length){ toast('No sites found. Use one line per site: URL, correct ID'); return false; }
+  sites.push(...rows); renderSites(); toast(`Added ${rows.length} site${rows.length>1?'s':''}`); return true;
 }
-$('addPaste').onclick = ()=>{ const fd=new FormData(); fd.append('text',$('paste').value); parse(fd).then(()=>$('paste').value=''); };
+$('addPaste').onclick = async ()=>{ const fd=new FormData(); fd.append('text',$('paste').value); if(await parse(fd)) $('paste').value=''; };
+$('paste').addEventListener('keydown', e=>{ if(e.key==='Enter' && (e.metaKey||e.ctrlKey)) $('addPaste').click(); });
 $('file').onchange = e=>{ const fd=new FormData(); fd.append('file',e.target.files[0]); parse(fd); e.target.value=''; };
-$('cookie_name').oninput = e=> $('cnHdr').textContent = e.target.value || 'trackerID';
 
+/* ---------- run ---------- */
 $('run').onclick = async ()=>{
   const list = sites.filter(s=>s.url.trim());
-  if(!list.length) return alert('Add at least one site with a URL.');
-  const settings = {}; ['cookie_name','wait_seconds','google_domain'].forEach(k=>settings[k]=$(k).value);
-  ['accept_cookie_banner','fallback_direct','case_sensitive','headless'].forEach(k=>settings[k]=$(k).checked);
-  const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sites:list,settings})});
-  const j = await r.json(); if(j.error) return alert(j.error); poll();
+  if(!list.length) return toast('Add at least one site first');
+  const r = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sites:list,settings:readSettings()})});
+  const j = await r.json(); if(j.error) return toast(j.error); poll();
 };
-$('stop').onclick = ()=> fetch('/api/stop',{method:'POST'});
+$('stop').onclick = ()=>{ fetch('/api/stop',{method:'POST'}); toast('Stopping after the current site…'); };
+
+/* ---------- results ---------- */
+const LABEL = {MATCH:'Match', MISMATCH:'Mismatch', NOT_FOUND:'Not found', NOT_IN_SERP:'Not in Google', CAPTCHA:'CAPTCHA', ERROR:'Error', NO_EXPECTED_ID:'No expected ID'};
+const COLOR = {MATCH:'var(--ok)', MISMATCH:'var(--bad)', ERROR:'var(--bad)'};
+function shortUrl(u){ try{ const x=new URL(u); return (x.hostname.replace(/^www\./,'')+x.pathname).replace(/\/$/,''); }catch(e){ return u; } }
+function httpLine(r){
+  if(!/^\d+$/.test(String(r.http_status||''))) return '';
+  const c = String(r.http_status)[0];
+  const to = r.redirect_to ? ` <span>→ ${esc(shortUrl(r.redirect_to))}</span>` : '';
+  return `<span class="http" title="${esc(r.http_chain)}"><span class="code c${c}">${esc(r.http_status)}</span>${to}</span>`;
+}
+function journey(r){
+  if(r.journey==='google-click') return `<span class="nowrap">Google${r.serp_position && r.serp_position!=='sitelink/other' ? ' · #'+esc(r.serp_position) : ''}</span>`;
+  if(r.journey==='direct-fallback') return '<span class="nowrap muted" title="Opened directly with a Google referrer">Direct</span>';
+  return '<span class="muted">—</span>';
+}
 
 let timer;
 async function poll(){
   clearTimeout(timer);
-  const s = await (await fetch('/api/status')).json();
+  let s; try{ s = await (await fetch('/api/status')).json(); }catch(e){ timer=setTimeout(poll,3000); return; }
   $('run').disabled = s.running; $('stop').disabled = !s.running;
-  $('log').textContent = s.log.join('\n'); $('log').scrollTop = 1e9;
-  $('prog').style.width = s.total ? (100*s.results.length/s.total)+'%' : 0;
-  const c = {}; s.results.forEach(r=>c[r.status]=(c[r.status]||0)+1);
-  $('stats').innerHTML = s.total ? [['Checked',`${s.results.length}/${s.total}`],...Object.entries(c)]
-      .map(([k,v])=>`<div class="stat"><span class="small mute">${esc(k.replace(/_/g,' '))}</span><b>${v}</b></div>`).join('') : '';
-  if(s.results.length) $('results').innerHTML = s.results.map(r=>`<tr>
-      <td><span class="pill ${r.status}">${r.status.replace(/_/g,' ')}</span></td>
-      <td><b>${esc(r.brand)}</b><div class="small mute">${esc(r.landing_url||r.url)}</div></td>
-      <td class="mono">${esc(r.expected_id)}</td><td class="mono">${esc(r.actual_id)||'<span class=mute>—</span>'}</td>
-      <td class="small">${esc(r.journey)}${r.serp_position?`<div class=mute>Google pos ${esc(r.serp_position)}</div>`:''}</td>
-      <td class="small">${esc(r.cookie_domain)}</td>
-      <td class="small">${esc(r.note)}${r.other_values?`<div class=mute>Also seen: ${esc(r.other_values)}</div>`:''}</td>
-      <td>${r.screenshot?`<a class="small" target="_blank" href="/shots/${encodeURIComponent(r.screenshot.split(/[\\/]/).pop())}">screenshot</a>`:''}</td></tr>`).join('');
-  if(s.running) timer = setTimeout(poll, 1500);
+  $('log').textContent = s.log.length ? s.log.join('\n') : 'Nothing has run yet.'; $('log').scrollTop = 1e9;
+  const done = s.results.length;
+  $('runStatus').textContent = s.running ? `Checking ${Math.min(done+1,s.total)} of ${s.total}…` : (done ? `Last run: ${done} of ${s.total} checked` : '');
+  $('resWhen').textContent = s.started || '';
+  if(s.total){
+    $('sumWrap').style.display='';
+    $('strip').innerHTML = Array.from({length:s.total},(_,i)=>{ const r=s.results[i];
+      return `<i class="${r ? r.status : (s.running && i===done ? 'active' : '')}" title="${r ? esc(shortUrl(r.url))+': '+(LABEL[r.status]||r.status) : ''}"></i>`; }).join('');
+    const c={}; s.results.forEach(r=>c[r.status]=(c[r.status]||0)+1);
+    const order=['MATCH','MISMATCH','NOT_FOUND','NOT_IN_SERP','CAPTCHA','ERROR','NO_EXPECTED_ID'];
+    $('summary').innerHTML = order.filter(k=>c[k]).map(k=>`<span class="sum"><b>${c[k]}</b><span class="dot" style="background:${COLOR[k]||'var(--warn)'}"></span>${LABEL[k]}</span>`).join('')
+      || '<span class="sum muted">Starting…</span>';
+  }
+  if(done) $('results').innerHTML = s.results.map(r=>{
+    const shot = r.screenshot ? `<a class="btn icon ghost" target="_blank" href="/shots/${encodeURIComponent(r.screenshot.split(/[\\/]/).pop())}" title="Screenshot of the page">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg></a>` : '';
+    const info = (r.note || r.other_values) ? `<span class="btn icon ghost" tabindex="0" title="${esc([r.note, r.other_values ? 'Also seen: '+r.other_values : '', r.cookie_domain ? 'Cookie on: '+r.cookie_domain : ''].filter(Boolean).join('\n'))}">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>` : '';
+    const actualCls = r.actual_id ? (r.status==='MATCH' ? 'ok' : (r.status==='MISMATCH' ? 'bad' : '')) : '';
+    return `<tr>
+      <td><span class="pill ${r.status}">${LABEL[r.status]||esc(r.status)}</span></td>
+      <td><div class="site"><a href="${esc(r.url.match(/^https?:/i)?r.url:'https://'+r.url)}" target="_blank" rel="noopener" title="${esc(r.url)}">${esc(shortUrl(r.url.match(/^https?:/i)?r.url:'https://'+r.url))}</a>
+          <span class="muted" style="font-size:12px" title="Google search used">${esc(r.search_query||'')}</span>${httpLine(r)}</div></td>
+      <td><span class="id">${esc(r.expected_id) || '<span class="muted">—</span>'}</span></td>
+      <td><span class="id ${actualCls}">${esc(r.actual_id) || '<span class="muted">—</span>'}</span></td>
+      <td>${journey(r)}</td>
+      <td><div class="actions">${info}${shot}</div></td></tr>`; }).join('');
+  if(s.running) timer = setTimeout(poll, 1200);
 }
-renderSites(); poll();
+
+/* ---------- updates ---------- */
+fetch('/api/version').then(r=>r.ok?r.text():Promise.reject()).then(v=>$('ver').textContent='v'+v).catch(()=>{});
 async function checkUpdate(manual){
-  $('updState').textContent = 'Checking…';
+  if(manual) $('updState').textContent = 'Checking…';
   try{
     const u = await (await fetch('/api/update/check')).json();
     if(u.available){
-      $('updMsg').innerHTML = `<b>New version available:</b> v${esc(u.latest)} (you have v${esc(u.local)}).`;
+      $('updMsg').innerHTML = `<b>Version ${esc(u.latest)} is available.</b> You have ${esc(u.local)}.`;
       $('upd').classList.add('show'); $('updState').textContent = '';
     } else {
       $('upd').classList.remove('show');
-      $('updState').textContent = u.error ? u.error : (manual ? `You're on the latest version (v${u.local}).` : '');
+      $('updState').textContent = manual ? (u.error || `You're on the latest version.`) : '';
+      if(manual) setTimeout(()=>$('updState').textContent='', 4000);
     }
-  }catch(e){ $('updState').textContent = "Couldn't check for updates."; }
+  }catch(e){ if(manual) $('updState').textContent = "Couldn't check for updates."; }
 }
 $('checkUpd').onclick = ()=>checkUpdate(true);
 $('doUpd').onclick = async ()=>{
@@ -171,17 +481,17 @@ $('doUpd').onclick = async ()=>{
   try{
     const r = await fetch('/api/update',{method:'POST'}); const j = await r.json();
     if(j.error){ $('updMsg').textContent = j.error; $('doUpd').disabled = false; return; }
-    $('updMsg').textContent = `Updated to v${j.version}. Restarting the tool…`;
+    $('updMsg').textContent = `Updated to ${j.version}. Restarting…`;
     const t0 = Date.now();
     const wait = async ()=>{ await new Promise(r=>setTimeout(r,1500));
       try{ const v = await (await fetch('/api/version',{cache:'no-store'})).text(); if(v.trim()===j.version) return location.reload(); }catch(e){}
       if(Date.now()-t0 < 60000) return wait();
-      $('updMsg').textContent = 'Updated. Please close the Terminal window and open start-mac.command again.'; };
+      $('updMsg').textContent = 'Updated. Close the Terminal window and open start-mac.command again.'; };
     wait();
   }catch(e){ $('updMsg').textContent = 'Update failed: '+e; $('doUpd').disabled = false; }
 };
-checkUpdate(false);
-fetch('/api/version').then(r=>r.ok?r.text():Promise.reject()).then(v=>$('ver').textContent='v'+v).catch(()=>{});
+
+renderSites(); refreshQueries(false); poll(); checkUpdate(false);
 </script>
 </body>
 </html>

@@ -28,16 +28,24 @@ from urllib.parse import quote_plus, unquote, urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
+from query_builder import DEFAULT_DIRECTORY_TERMS, describe_url
+
 # --------------------------------------------------------------------------- #
 # Data models
 # --------------------------------------------------------------------------- #
 
 @dataclass
 class Site:
-    brand: str
     url: str
     expected_id: str
-    search_query: str = ""          # optional override of what to type into Google
+    search_query: str = ""          # optional override; generated from the URL when blank
+    brand: str = ""                 # generated from the URL when blank
+    directory_terms: dict = field(default_factory=lambda: dict(DEFAULT_DIRECTORY_TERMS), repr=False)
+
+    def __post_init__(self):
+        info = describe_url(self.url, self.directory_terms)
+        self.brand = self.brand.strip() or info["brand"] or self.domain
+        self.search_query = self.search_query.strip() or info["query"] or self.brand
 
     @property
     def domain(self) -> str:
@@ -45,7 +53,7 @@ class Site:
 
     @property
     def query(self) -> str:
-        return self.search_query.strip() or self.brand.strip() or self.domain
+        return self.search_query
 
 
 @dataclass
@@ -61,6 +69,7 @@ class Settings:
     google_params: str = "hl=en&gl=ca"
     screenshots_dir: str = "screenshots"
     case_sensitive_match: bool = True
+    check_http: bool = True         # record the URL's HTTP status / redirects
 
 
 @dataclass
@@ -68,6 +77,7 @@ class Result:
     brand: str
     url: str
     expected_id: str
+    search_query: str = ""
     status: str = "PENDING"         # MATCH | MISMATCH | NOT_FOUND | NOT_IN_SERP | CAPTCHA | ERROR
     actual_id: str = ""
     cookie_domain: str = ""
@@ -75,6 +85,9 @@ class Result:
     journey: str = ""               # google-click | direct-fallback
     serp_position: str = ""
     landing_url: str = ""
+    http_status: str = ""           # status of the URL as entered (e.g. 200, 301)
+    redirect_to: str = ""           # final URL if it redirected
+    http_chain: str = ""            # e.g. "301 https://a → 200 https://b"
     note: str = ""
     screenshot: str = ""
     checked_at: str = ""
@@ -112,16 +125,27 @@ def _map_headers(headers: list[str]) -> dict[str, int]:
     return found
 
 
-def parse_sites(text: str) -> list[Site]:
+def _looks_like_url(v: str) -> bool:
+    v = v.strip()
+    return bool(v) and " " not in v and ("." in v) and not v.replace(".", "").isdigit()
+
+
+def parse_sites(text: str, directory_terms: dict | None = None) -> list[Site]:
     """Accepts CSV text (with or without a header row) or pasted lines.
-    Without a header the column order is: brand, url, expected_id[, search_query].
+    Without a header the column order is: url, expected_id[, search_query]
+    (the older brand, url, expected_id[, search_query] order is still understood).
     Commas, tabs (pasted from Excel/Sheets) and semicolons are all accepted."""
     text = text.strip()
     if not text:
         return []
-    first = text.splitlines()[0]
-    delim = "\t" if "\t" in first else (";" if first.count(";") > first.count(",") else ",")
-    rows = [r for r in csv.reader(io.StringIO(text), delimiter=delim) if any(c.strip() for c in r)]
+    rows = []
+    for line in text.splitlines():           # each line may use its own separator (tab, comma or ;)
+        if not line.strip():
+            continue
+        delim = "\t" if "\t" in line else (";" if line.count(";") > line.count(",") else ",")
+        row = next(csv.reader([line], delimiter=delim), [])
+        if any(c.strip() for c in row):
+            rows.append(row)
     if not rows:
         return []
 
@@ -129,7 +153,10 @@ def parse_sites(text: str) -> list[Site]:
     if {"url", "expected_id"} <= mapping.keys():
         body = rows[1:]
     else:
-        mapping = {"brand": 0, "url": 1, "expected_id": 2, "search_query": 3}
+        if _looks_like_url(rows[0][0]):
+            mapping = {"url": 0, "expected_id": 1, "search_query": 2}
+        else:
+            mapping = {"brand": 0, "url": 1, "expected_id": 2, "search_query": 3}
         body = rows
 
     def cell(row, key):
@@ -139,11 +166,11 @@ def parse_sites(text: str) -> list[Site]:
     sites = []
     for row in body:
         url, expected = cell(row, "url"), cell(row, "expected_id")
-        if not url:
+        if not _looks_like_url(url):
             continue
-        sites.append(Site(brand=cell(row, "brand") or normalise_domain(url),
-                          url=url, expected_id=expected,
-                          search_query=cell(row, "search_query")))
+        sites.append(Site(url=url, expected_id=expected, brand=cell(row, "brand"),
+                          search_query=cell(row, "search_query"),
+                          directory_terms=dict(directory_terms or DEFAULT_DIRECTORY_TERMS)))
     return sites
 
 
@@ -271,14 +298,45 @@ def _norm_value(v: str, case_sensitive: bool) -> str:
     return v if case_sensitive else v.lower()
 
 
+CHROME_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36")
+
+
+def _http_check(api, url: str) -> tuple[str, str, str]:
+    """Follows redirects one by one. Returns (first status, final url if redirected, chain)."""
+    from urllib.parse import urljoin
+    cur = url if re.match(r"^https?://", url, re.I) else "https://" + url
+    chain, first = [], ""
+    for _ in range(10):
+        resp = api.get(cur, max_redirects=0, timeout=20000, fail_on_status_code=False)
+        status = resp.status
+        first = first or str(status)
+        chain.append(f"{status} {cur}")
+        loc = resp.headers.get("location")
+        resp.dispose()
+        if 300 <= status < 400 and loc:
+            cur = urljoin(cur, loc)
+            continue
+        break
+    start = url if re.match(r"^https?://", url, re.I) else "https://" + url
+    final = cur if cur.rstrip("/") != start.rstrip("/") else ""
+    return first, final, " → ".join(chain)
+
+
 # --------------------------------------------------------------------------- #
 # Main check
 # --------------------------------------------------------------------------- #
 
-def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = print) -> Result:
-    r = Result(brand=site.brand, url=site.url, expected_id=site.expected_id,
+def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = print, api=None) -> Result:
+    r = Result(brand=site.brand, url=site.url, expected_id=site.expected_id, search_query=site.query,
                checked_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     domain = site.domain
+    if api is not None and s.check_http:
+        try:
+            r.http_status, r.redirect_to, r.http_chain = _http_check(api, site.url)
+            log(f"[{site.brand}] URL answered {r.http_status}" + (f", redirects to {r.redirect_to}" if r.redirect_to else ""))
+        except Exception as e:
+            r.http_status, r.http_chain = "—", f"{type(e).__name__}: {str(e).splitlines()[0][:120]}"
     context = browser.new_context(
         locale="en-CA", viewport={"width": 1366, "height": 860},
         user_agent=None,  # keep the real browser UA
@@ -410,7 +468,7 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
     finally:
         try:
             os.makedirs(s.screenshots_dir, exist_ok=True)
-            fn = re.sub(r"[^a-z0-9]+", "-", f"{site.brand}-{domain}".lower()).strip("-") + ".png"
+            fn = re.sub(r"[^a-z0-9]+", "-", f"{domain}-{urlparse(site.url if '://' in site.url else 'https://' + site.url).path}".lower()).strip("-") + ".png"
             path = os.path.join(s.screenshots_dir, fn)
             page.screenshot(path=path)
             r.screenshot = path
@@ -436,17 +494,20 @@ def run_checks(sites: list[Site], s: Settings, log: Callable[[str], None] = prin
     results = []
     with sync_playwright() as p:
         browser = launch_browser(p, s)
+        api = p.request.new_context(user_agent=CHROME_UA,
+                                    extra_http_headers={"Accept-Language": "en-CA,en;q=0.9"})
         try:
             for i, site in enumerate(sites, 1):
                 if should_stop():
                     log("Stopped by user.")
                     break
                 log(f"--- {i}/{len(sites)}: {site.brand} ({site.domain}) ---")
-                res = check_site(browser, site, s, log)
+                res = check_site(browser, site, s, log, api=api)
                 results.append(res)
                 on_result(res)
                 time.sleep(2)  # be gentle with Google between searches
         finally:
+            api.dispose()
             browser.close()
     return results
 
@@ -469,7 +530,7 @@ def results_to_csv(results: list[Result]) -> str:
 
 def main():
     ap = argparse.ArgumentParser(description="Check trackerID cookies after a Google → site journey.")
-    ap.add_argument("csv", help="CSV with columns: brand, url, expected_id[, search_query]")
+    ap.add_argument("csv", help="CSV with columns: url, expected_id[, search_query]")
     ap.add_argument("--out", default=f"results_{datetime.now():%Y%m%d_%H%M}.csv")
     ap.add_argument("--cookie-name", default="trackerID")
     ap.add_argument("--wait", type=int, default=8, help="seconds to wait for the cookie after landing")
