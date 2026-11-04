@@ -28,7 +28,7 @@ from urllib.parse import quote_plus, unquote, urlparse
 
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
-from query_builder import DEFAULT_DIRECTORY_TERMS, describe_url
+from query_builder import DEFAULT_DIRECTORY_TERMS, SECOND_LEVEL, describe_url
 
 # --------------------------------------------------------------------------- #
 # Data models
@@ -59,7 +59,7 @@ class Site:
 @dataclass
 class Settings:
     cookie_name: str = "trackerID"
-    wait_seconds: int = 8           # how long to keep polling for the cookie after landing
+    wait_seconds: int = 5           # how long to keep polling for the cookie after landing
     headless: bool = False          # visible browser is far less likely to hit Google CAPTCHA
     use_installed_chrome: bool = True
     accept_cookie_banner: bool = True
@@ -68,7 +68,7 @@ class Settings:
     google_domain: str = "https://www.google.com"
     google_params: str = "hl=en&gl=ca"
     screenshots_dir: str = "screenshots"
-    case_sensitive_match: bool = True
+    case_sensitive_match: bool = False
     check_http: bool = True         # record the URL's HTTP status / redirects
 
 
@@ -81,9 +81,12 @@ class Result:
     status: str = "PENDING"         # MATCH | MISMATCH | NOT_FOUND | NOT_IN_SERP | CAPTCHA | ERROR
     actual_id: str = ""
     cookie_domain: str = ""
-    tracker_count: int = 0          # how many different tracker IDs the site set (trackerID, trackerId2 …)
-    all_tracker_ids: str = ""       # e.g. "trackerID=ABC; trackerId2=XYZ"
+    tracker_count: int = 0          # how many tracker-ID entries the site set (trackerId, trackerId2 … on any domain)
+    match_count: int = 0            # how many of them equal the correct ID
+    all_tracker_ids: str = ""       # e.g. "trackerId=5418588 (.sportsinteraction.com); trackerId2=…"
+    trackers: list = field(default_factory=list)  # same, structured (for the app; not in the CSV)
     journey: str = ""               # google-click | direct-fallback
+    fallback_reason: str = ""       # why the Google click wasn't used (shown with direct-fallback)
     serp_position: str = ""
     landing_url: str = ""
     http_status: str = ""           # status of the URL as entered (e.g. 200, 301)
@@ -245,29 +248,68 @@ def _real_target(href: str) -> str:
     return href
 
 
-def _find_serp_result(page, domain: str):
-    """Returns (locator, position, href) of the first organic result pointing at domain."""
-    links = page.locator("#search a:has(h3), #rso a:has(h3)")
-    count = links.count()
-    for i in range(count):
-        a = links.nth(i)
-        try:
-            href = _real_target(a.get_attribute("href") or "")
-        except Exception:
+def _registrable(host: str) -> str:
+    labels = (host or "").lower().removeprefix("www.").split(".")
+    if len(labels) >= 3 and ".".join(labels[-2:]) in SECOND_LEVEL:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
+_COLLECT_SERP_JS = """() => {
+  const root = document.querySelector('#rso') || document.querySelector('#search') || document.querySelector('#center_col') || document.body;
+  const out = []; let pos = 0; const seen = new Set();
+  root.querySelectorAll('a[href]').forEach((a, i) => {
+    const href = a.href || '';
+    if (!/^https?:/i.test(href)) return;
+    let host = ''; try { host = new URL(href).hostname; } catch (e) { return; }
+    const isGoogle = /(^|\\.)google\\.[a-z.]+$/i.test(host) || /googleusercontent|gstatic|youtube\\.com\\/redirect/i.test(href);
+    const r = a.getBoundingClientRect();
+    if (!r.width || !r.height) return;              // hidden
+    const main = !!a.querySelector('h3');           // a result's title link
+    if (main && !seen.has(href)) { seen.add(href); pos += 1; }
+    a.setAttribute('data-tc-i', String(i));
+    out.push({i, href, main, pos: main ? pos : null, near: pos, google: isGoogle && !/\\/url\\?/.test(href)});
+  });
+  return out;
+}"""
+
+
+def _find_serp_result(page, site_url: str):
+    """Looks at every result on the first Google page (not just the top one) and picks the link that
+    best matches the URL: same page > same host > same brand domain (e.g. www. vs on.).
+    Returns (locator, position, href, how) or (None, None, None, "")."""
+    want = urlparse(site_url if re.match(r"^https?://", site_url, re.I) else "https://" + site_url)
+    want_host = (want.hostname or "").lower().removeprefix("www.")
+    want_path = want.path.lower().rstrip("/")
+    want_reg = _registrable(want_host)
+    try:
+        links = page.evaluate(_COLLECT_SERP_JS)
+    except Exception:
+        links = []
+    best = None
+    for l in links:
+        if l["google"]:
             continue
-        if _host_matches(urlparse(href).hostname, domain):
-            return a, i + 1, href
-    # Fallback: any link on the results page that points at the domain (e.g. sitelinks)
-    anylinks = page.locator("#search a[href], #rso a[href]")
-    for i in range(anylinks.count()):
-        a = anylinks.nth(i)
-        try:
-            href = _real_target(a.get_attribute("href") or "")
-        except Exception:
+        href = _real_target(l["href"])
+        p = urlparse(href)
+        host = (p.hostname or "").lower().removeprefix("www.")
+        if _registrable(host) != want_reg:
             continue
-        if _host_matches(urlparse(href).hostname, domain) and a.is_visible():
-            return a, None, href
-    return None, None, None
+        if host == want_host and p.path.lower().rstrip("/") == want_path:
+            score, how = 3, "exact page"
+        elif host == want_host:
+            score, how = 2, "same site"
+        else:
+            score, how = 1, f"brand domain ({host})"
+        score += 0.5 if l["main"] else 0             # prefer the result title over a small sitelink
+        if best is None or score > best[0]:
+            best = (score, l, href, how)
+    if not best:
+        return None, None, None, ""
+    _, l, href, how = best
+    loc = page.locator(f'[data-tc-i="{l["i"]}"]').first
+    pos = l["pos"] or l["near"] or None
+    return loc, pos, href, how + ("" if l["main"] else ", sitelink")
 
 
 def _tracker_name_re(cookie_name: str):
@@ -350,69 +392,90 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
     )
     page = context.new_page()
     try:
-        # ---- 1. Google search ------------------------------------------------
+        # ---- 1. Google search → click the site anywhere on the first results page ------
         log(f"[{site.brand}] Searching Google for “{site.query}”")
         landed_via_google = False
         try:
-            page.goto(f"{s.google_domain}/?{s.google_params}", wait_until="domcontentloaded", timeout=30000)
-            _click_first_visible(page, GOOGLE_CONSENT_BUTTONS)
-            box = page.locator("textarea[name=q], input[name=q]").first
-            box.click(timeout=10000)
-            box.type(site.query, delay=60)
-            box.press("Enter")
-            page.wait_for_url(lambda u: "/search" in u or "/sorry/" in u, timeout=15000)
-            page.wait_for_load_state("domcontentloaded", timeout=30000)
-        except Exception as e:
-            log(f"[{site.brand}] Search box route failed ({type(e).__name__}); using search URL")
-            page.goto(f"{s.google_domain}/search?q={quote_plus(site.query)}&{s.google_params}",
-                      wait_until="domcontentloaded", timeout=30000)
-            _click_first_visible(page, GOOGLE_CONSENT_BUTTONS)
-
-        if _is_captcha(page):
-            if not s.headless and s.captcha_wait_seconds > 0:
-                log(f"[{site.brand}] Google CAPTCHA shown — solve it in the browser window "
-                    f"(waiting up to {s.captcha_wait_seconds}s)")
-                deadline = time.time() + s.captcha_wait_seconds
-                while time.time() < deadline and _is_captcha(page):
-                    page.wait_for_timeout(1000)
-            if _is_captcha(page):
-                r.status, r.note = "CAPTCHA", "Google blocked the search with a CAPTCHA."
-
-        if r.status != "CAPTCHA":
             try:
-                page.wait_for_selector("#search, #rso", timeout=15000)
-            except PWTimeout:
-                pass
-            link, pos, href = _find_serp_result(page, domain)
-            if link:
-                r.serp_position = str(pos) if pos else "sitelink/other"
-                log(f"[{site.brand}] Found {domain} in results (position {r.serp_position}); clicking")
-                link.scroll_into_view_if_needed(timeout=5000)
+                page.goto(f"{s.google_domain}/?{s.google_params}", wait_until="domcontentloaded", timeout=30000)
+                _click_first_visible(page, GOOGLE_CONSENT_BUTTONS)
+                box = page.locator("textarea[name=q], input[name=q]").first
+                box.click(timeout=10000)
+                box.type(site.query, delay=60)
+                box.press("Enter")
+                page.wait_for_url(lambda u: "/search" in u or "/sorry/" in u, timeout=15000)
+                page.wait_for_load_state("domcontentloaded", timeout=30000)
+            except Exception as e:
+                log(f"[{site.brand}] Search box route failed ({type(e).__name__}); using search URL")
+                page.goto(f"{s.google_domain}/search?q={quote_plus(site.query)}&{s.google_params}",
+                          wait_until="domcontentloaded", timeout=30000)
+                _click_first_visible(page, GOOGLE_CONSENT_BUTTONS)
+
+            if _is_captcha(page):
+                if not s.headless and s.captcha_wait_seconds > 0:
+                    log(f"[{site.brand}] Google CAPTCHA shown — solve it in the browser window "
+                        f"(waiting up to {s.captcha_wait_seconds}s)")
+                    deadline = time.time() + s.captcha_wait_seconds
+                    while time.time() < deadline and _is_captcha(page):
+                        page.wait_for_timeout(1000)
+                if _is_captcha(page):
+                    r.status, r.fallback_reason = "CAPTCHA", "Google showed a CAPTCHA"
+
+            if r.status != "CAPTCHA":
                 try:
-                    with context.expect_page(timeout=4000) as new_page_info:
-                        link.click()
-                    page = new_page_info.value  # result opened in a new tab
-                except PWTimeout:
-                    pass  # opened in the same tab — normal case
-                try:
-                    page.wait_for_url(lambda u: _host_matches(urlparse(u).hostname, domain), timeout=30000)
+                    page.wait_for_selector("#search, #rso", timeout=15000)
                 except PWTimeout:
                     pass
-                landed_via_google = _host_matches(urlparse(page.url).hostname, domain)
-                r.journey = "google-click"
-                if not landed_via_google:
-                    r.note = f"Clicked the Google result but ended up on {page.url}."
-            else:
-                r.status = "NOT_IN_SERP"
-                r.note = f"{domain} not found on page 1 of Google for “{site.query}”."
-                log(f"[{site.brand}] {r.note}")
+                link, pos, href, how = _find_serp_result(page, site.url)
+                if link:
+                    r.serp_position = str(pos) if pos else ""
+                    log(f"[{site.brand}] Found it on Google page 1 (position {r.serp_position or '?'}, {how}): {href}")
+                    link.scroll_into_view_if_needed(timeout=5000)
+                    target_reg = _registrable(urlparse(href).hostname or domain)
+                    def _click():
+                        try:
+                            link.click(timeout=10000)
+                        except Exception:
+                            link.click(timeout=10000, force=True)  # something (pop-up, overlay) was in the way
+                    try:
+                        with context.expect_page(timeout=4000) as new_page_info:
+                            _click()
+                        page = new_page_info.value  # result opened in a new tab
+                    except PWTimeout:
+                        pass  # opened in the same tab — normal case
+                    try:
+                        page.wait_for_url(lambda u: _registrable(urlparse(u).hostname or "") == target_reg, timeout=8000)
+                    except PWTimeout:
+                        # still on Google: something covered the link — click the link element itself
+                        log(f"[{site.brand}] Click didn't open the site; clicking the link element directly")
+                        try:
+                            link.evaluate("el => el.click()")
+                            page.wait_for_url(lambda u: _registrable(urlparse(u).hostname or "") == target_reg, timeout=30000)
+                        except Exception:
+                            pass
+                    landed_via_google = _registrable(urlparse(page.url).hostname or "") == target_reg
+                    r.journey = "google-click"
+                    if how != "exact page":
+                        r.note = f"Google result used: {href} ({how})."
+                    if not landed_via_google:
+                        r.fallback_reason = f"Clicking the Google result ended on {page.url}"
+                else:
+                    r.status = "NOT_IN_SERP"
+                    r.fallback_reason = "Not found on Google page 1"
+                    log(f"[{site.brand}] {domain} not found on page 1 of Google for “{site.query}”")
+        except Exception as e:
+            r.fallback_reason = f"Google search failed ({type(e).__name__})"
+            log(f"[{site.brand}] {r.fallback_reason}: {str(e).splitlines()[0][:160]}")
 
-        # ---- 2. Fallback: open directly, telling the site we came from Google -------
+        # ---- 2. Direct fallback: open the URL directly, telling the site we came from Google ----
         if not landed_via_google:
             if not s.fallback_direct:
+                r.note = (r.fallback_reason + ". Direct fallback is turned off.").strip()
+                if r.status not in ("CAPTCHA", "NOT_IN_SERP"):
+                    r.status = "ERROR"
                 return r
             url = site.url if re.match(r"^https?://", site.url, re.I) else "https://" + site.url
-            log(f"[{site.brand}] Opening {url} directly with a Google referrer (fallback)")
+            log(f"[{site.brand}] {r.fallback_reason} → direct fallback: opening {url} with a Google referrer")
             page = context.new_page()
             page.goto(url, referer=f"{s.google_domain}/", wait_until="domcontentloaded", timeout=45000)
             r.journey = "direct-fallback"
@@ -459,22 +522,31 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
             best = match or found[0]
             r.actual_id = unquote(best["value"])
             r.cookie_domain = f'{best["exact_name"]} on {best["domain"]} ({best["source"]})'
-            # unique tracker IDs by name + value (the same cookie can appear on several domains)
-            uniq = {}
+            # every entry, one per name + domain (the same name often exists on .brand.com and .on.brand.com)
+            entries, seen = [], set()
             for f in found:
-                uniq.setdefault((f["exact_name"].lower(), unquote(f["value"])), f)
-            ordered = sorted(uniq.values(), key=lambda f: (f is not best, f["exact_name"].lower()))
-            r.tracker_count = len(uniq)
-            r.all_tracker_ids = "; ".join(f'{f["exact_name"]}={unquote(f["value"])}' for f in ordered)
+                key = (f["exact_name"].lower(), f["domain"].lstrip(".").lower(), unquote(f["value"]), f["source"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                hit = bool(site.expected_id) and _norm_value(f["value"], s.case_sensitive_match) == exp
+                entries.append({"name": f["exact_name"], "domain": f["domain"], "source": f["source"],
+                                "value": unquote(f["value"]), "match": hit})
+            entries.sort(key=lambda e: (not e["match"], e["name"].lower(), e["domain"].lstrip(".")))
+            r.trackers = entries
+            r.tracker_count = len(entries)
+            r.match_count = sum(e["match"] for e in entries)
+            r.all_tracker_ids = "; ".join(
+                f'{e["name"]}={e["value"]} ({e["domain"]}{"" if e["source"] == "cookie" else ", " + e["source"]})'
+                for e in entries)
             r.status = "MATCH" if match else "MISMATCH"
             if r.tracker_count > 1:
-                r.note = (r.note + " " if r.note else "") + f"{r.tracker_count} tracker IDs found."
+                r.note = (r.note + " " if r.note else "") + (
+                    f"{r.tracker_count} tracker IDs found; {r.match_count} match the correct ID.")
             if not site.expected_id:
                 r.status, r.note = "NO_EXPECTED_ID", "Found a value but no expected ID was given."
-        if prev_status == "CAPTCHA":
-            r.note = "Google CAPTCHA – checked via direct fallback. " + r.note
-        elif prev_status == "NOT_IN_SERP":
-            r.note = r.note + " Checked via direct fallback."
+        if r.journey == "direct-fallback":
+            r.note = f"{r.fallback_reason} – checked via direct fallback. " + r.note
         r.note = r.note.strip()
         log(f"[{site.brand}] {r.status}  expected={site.expected_id!r} actual={r.actual_id!r}")
 
@@ -529,7 +601,7 @@ def run_checks(sites: list[Site], s: Settings, log: Callable[[str], None] = prin
     return results
 
 
-RESULT_COLUMNS = list(Result.__dataclass_fields__.keys())
+RESULT_COLUMNS = [k for k in Result.__dataclass_fields__ if k != "trackers"]
 
 
 def results_to_csv(results: list[Result]) -> str:
@@ -537,7 +609,9 @@ def results_to_csv(results: list[Result]) -> str:
     w = csv.DictWriter(buf, fieldnames=RESULT_COLUMNS)
     w.writeheader()
     for r in results:
-        w.writerow(asdict(r))
+        row = asdict(r)
+        row.pop("trackers", None)
+        w.writerow(row)
     return buf.getvalue()
 
 
@@ -550,7 +624,7 @@ def main():
     ap.add_argument("csv", help="CSV with columns: url, expected_id[, search_query]")
     ap.add_argument("--out", default=f"results_{datetime.now():%Y%m%d_%H%M}.csv")
     ap.add_argument("--cookie-name", default="trackerID")
-    ap.add_argument("--wait", type=int, default=8, help="seconds to wait for the cookie after landing")
+    ap.add_argument("--wait", type=int, default=5, help="seconds to wait for the cookie after landing")
     ap.add_argument("--headless", action="store_true", help="hide the browser (more Google CAPTCHAs)")
     ap.add_argument("--no-fallback", action="store_true", help="don't open the site directly if Google fails")
     ap.add_argument("--no-banner", action="store_true", help="don't auto-accept the site's cookie banner")

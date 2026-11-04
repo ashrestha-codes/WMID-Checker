@@ -149,8 +149,14 @@
   .stat-cell{display:flex;flex-direction:column;align-items:flex-start;gap:5px}
   .multi{font:500 11px var(--sans);color:var(--ink-2);background:var(--raised);border:1px solid var(--line);border-radius:5px;padding:0 6px;white-space:nowrap}
   .ids{display:grid;gap:4px}
+  .jr{display:flex;flex-direction:column;gap:2px}
+  .jr .why{font-size:12px;color:var(--muted);white-space:nowrap}
+  .fb{color:var(--warn);font-weight:500}
   .idrow{display:flex;align-items:baseline;gap:8px;white-space:nowrap}
   .idname{font:500 11px var(--mono);color:var(--muted);min-width:76px}
+  .iddom{font-size:11.5px;color:var(--muted)}
+  .hit{color:var(--ok);font-weight:600;font-size:12px}
+  .err{font-size:12px;color:var(--bad);max-width:240px;white-space:normal;line-height:1.35}
 
   details.log{border-top:1px solid var(--line)}
   details.log summary{list-style:none;cursor:pointer;padding:12px 20px;color:var(--muted);font-size:13px;display:flex;align-items:center;gap:8px}
@@ -305,11 +311,11 @@
 games = online casino games
 promo = promos</textarea>
       <small>Words added to the Google search for each page section. Words already in the brand name are skipped.</small></label>
-    <label class="field"><span>Wait for the cookie (seconds)</span><input id="wait_seconds" type="number" min="1" max="60" value="8"></label>
+    <label class="field"><span>Wait for the cookie (seconds)</span><input id="wait_seconds" type="number" min="1" max="60" value="5"></label>
     <label class="field"><span>Google address</span><input id="google_domain" type="text" value="https://www.google.com"><small>Use https://www.google.ca for Canadian results.</small></label>
     <label class="toggle"><input id="accept_cookie_banner" type="checkbox" checked><span><b>Accept cookie banners</b><small>Clicks “Accept” on the site's cookie pop-up so tracking can start.</small></span></label>
-    <label class="toggle"><input id="fallback_direct" type="checkbox" checked><span><b>Open directly if not in Google</b><small>Visits the URL with a Google referrer when it can't be clicked in the results.</small></span></label>
-    <label class="toggle"><input id="case_sensitive" type="checkbox" checked><span><b>Case-sensitive ID match</b><small>Treat “abc” and “ABC” as different IDs.</small></span></label>
+    <label class="toggle"><input id="fallback_direct" type="checkbox" checked><span><b>If not clickable in Google, open site directly</b><small>Direct fallback: when the site isn't on Google page 1, Google shows a CAPTCHA, or the click fails, the URL is opened directly with a Google referrer. These results are marked “direct-fallback”.</small></span></label>
+    <label class="toggle"><input id="case_sensitive" type="checkbox"><span><b>Case-sensitive ID match</b><small>Treat “abc” and “ABC” as different IDs.</small></span></label>
     <label class="toggle"><input id="headless" type="checkbox"><span><b>Hide the browser window</b><small>Runs out of sight, but Google shows more CAPTCHAs.</small></span></label>
   </div>
 </aside>
@@ -333,9 +339,10 @@ paintThemeIcon();
 const SETTING_IDS = ['cookie_name','wait_seconds','google_domain','directory_terms'];
 const TOGGLE_IDS = ['accept_cookie_banner','fallback_direct','case_sensitive','headless'];
 const saved = store.get('tc_settings', {});
+if((saved._v||1) < 2){ delete saved.wait_seconds; delete saved.case_sensitive; saved._v = 2; store.set('tc_settings', saved); }
 SETTING_IDS.forEach(k=>{ if(saved[k]!==undefined) $(k).value = saved[k]; });
 TOGGLE_IDS.forEach(k=>{ if(saved[k]!==undefined) $(k).checked = saved[k]; });
-function readSettings(){ const o={}; SETTING_IDS.forEach(k=>o[k]=$(k).value); TOGGLE_IDS.forEach(k=>o[k]=$(k).checked); return o; }
+function readSettings(){ const o={_v:2}; SETTING_IDS.forEach(k=>o[k]=$(k).value); TOGGLE_IDS.forEach(k=>o[k]=$(k).checked); return o; }
 document.querySelector('.drawer').addEventListener('input', ()=>{
   store.set('tc_settings', readSettings()); $('cnHdr').textContent = $('cookie_name').value || 'trackerID';
 });
@@ -424,19 +431,18 @@ function httpLine(r){
   return `<span class="http" title="${esc(r.http_chain)}"><span class="code c${c}">${esc(r.http_status)}</span>${to}</span>`;
 }
 function journey(r){
-  if(r.journey==='google-click') return `<span class="nowrap">Google${r.serp_position && r.serp_position!=='sitelink/other' ? ' · #'+esc(r.serp_position) : ''}</span>`;
-  if(r.journey==='direct-fallback') return '<span class="nowrap muted" title="Opened directly with a Google referrer">Direct</span>';
+  if(r.journey==='google-click') return `<div class="jr"><span class="nowrap">google-click</span><span class="why">${r.serp_position ? 'Result #'+esc(r.serp_position)+' on page 1' : 'Page 1'}</span></div>`;
+  if(r.journey==='direct-fallback') return `<div class="jr"><span class="nowrap fb" title="Opened the URL directly with a Google referrer">direct-fallback</span><span class="why">${esc(r.fallback_reason||'')}</span></div>`;
+  if(r.fallback_reason) return `<div class="jr"><span class="nowrap muted">—</span><span class="why">${esc(r.fallback_reason)}</span></div>`;
   return '<span class="muted">—</span>';
 }
 
 function actualCell(r, cls){
-  const list = String(r.all_tracker_ids||'').split('; ').filter(Boolean).map(x=>{ const i=x.indexOf('='); return [x.slice(0,i), x.slice(i+1)]; });
+  const list = Array.isArray(r.trackers) ? r.trackers : [];
   if(list.length <= 1) return `<span class="id ${cls}">${esc(r.actual_id) || '<span class="muted">—</span>'}</span>`;
-  const cs = document.getElementById('case_sensitive').checked;
-  const norm = v => cs ? v.trim() : v.trim().toLowerCase();
-  return `<div class="ids">${list.map(([n,v])=>{
-    const hit = r.expected_id && norm(v)===norm(r.expected_id);
-    return `<div class="idrow"><span class="idname">${esc(n)}</span><span class="id ${hit?'ok':(r.status==='MISMATCH'?'bad':'')}">${esc(v)}</span></div>`; }).join('')}</div>`;
+  return `<div class="ids">${list.map(e=>`<div class="idrow" title="${esc(e.name)} on ${esc(e.domain)}${e.source!=='cookie'?' ('+esc(e.source)+')':''}">
+      <span class="idname">${esc(e.name)}</span><span class="id ${e.match?'ok':''}">${esc(e.value)}</span>
+      <span class="iddom">${esc(String(e.domain).replace(/^\./,''))}</span>${e.match?'<span class="hit">✓</span>':''}</div>`).join('')}</div>`;
 }
 
 let timer;
@@ -466,7 +472,7 @@ async function poll(){
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>` : '';
     const actualCls = r.actual_id ? (r.status==='MATCH' ? 'ok' : (r.status==='MISMATCH' ? 'bad' : '')) : '';
     return `<tr>
-      <td><div class="stat-cell"><span class="pill ${r.status}">${LABEL[r.status]||esc(r.status)}</span>${r.tracker_count>1 ? `<span class="multi" title="This site set ${r.tracker_count} tracker IDs">${r.tracker_count} IDs</span>` : ''}</div></td>
+      <td><div class="stat-cell"><span class="pill ${r.status}">${LABEL[r.status]||esc(r.status)}</span>${r.tracker_count>1 ? `<span class="multi" title="This site set ${r.tracker_count} tracker IDs; ${r.match_count||0} match">${r.match_count ? (r.match_count+' of '+r.tracker_count+' match') : (r.tracker_count+' IDs, none match')}</span>` : ''}${r.status==='ERROR' && r.note ? `<span class="err">${esc(r.note)}</span>` : ''}</div></td>
       <td><div class="site"><a href="${esc(r.url.match(/^https?:/i)?r.url:'https://'+r.url)}" target="_blank" rel="noopener" title="${esc(r.url)}">${esc(shortUrl(r.url.match(/^https?:/i)?r.url:'https://'+r.url))}</a>
           <span class="muted" style="font-size:12px" title="Google search used">${esc(r.search_query||'')}</span>${httpLine(r)}</div></td>
       <td><span class="id">${esc(r.expected_id) || '<span class="muted">—</span>'}</span></td>

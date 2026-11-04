@@ -86,12 +86,12 @@ def api_run():
         return jsonify(error="No sites to check."), 400
     settings = Settings(
         cookie_name=o.get("cookie_name") or "trackerID",
-        wait_seconds=int(o.get("wait_seconds") or 8),
+        wait_seconds=int(o.get("wait_seconds") or 5),
         headless=bool(o.get("headless")),
         accept_cookie_banner=bool(o.get("accept_cookie_banner", True)),
         fallback_direct=bool(o.get("fallback_direct", True)),
         google_domain=(o.get("google_domain") or "https://www.google.com").rstrip("/"),
-        case_sensitive_match=bool(o.get("case_sensitive", True)),
+        case_sensitive_match=bool(o.get("case_sensitive", False)),
         screenshots_dir=SHOTS,
     )
     state.update(running=True, log=[], results=[], total=len(sites), stop=False,
