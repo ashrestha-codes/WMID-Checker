@@ -537,17 +537,35 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
             pass
         r.landing_url = page.url
 
-        # ---- 4. Poll for the tracker cookie ---------------------------------------
-        found = []
-        deadline = time.time() + max(1, s.wait_seconds)
+        # ---- 4. Collect tracker cookies -------------------------------------------
+        # Sites often set several (trackerId, trackerId2 … on .brand.com AND .on.brand.com), some of them
+        # seconds later (after the cookie banner, by a second script). So: watch for the whole wait time,
+        # then keep watching while new ones still appear (until nothing new for 2s, max 8s extra).
+        def _keys(entries):
+            return {(f["exact_name"].lower(), f["domain"].lstrip(".").lower(), f["value"]) for f in entries}
+        found, last_change = [], time.time()
+        start = time.time()
+        hard_stop = start + max(1, s.wait_seconds) + 8
+        nudged = False
         while True:
-            found = _collect_tracker_values(context, page, s.cookie_name)
-            if found or time.time() >= deadline:
+            now_found = _collect_tracker_values(context, page, s.cookie_name)
+            if _keys(now_found) != _keys(found):
+                found, last_change = now_found, time.time()
+            elapsed = time.time() - start
+            if not nudged and elapsed > 1.5:
+                try:  # a little scroll wakes up scripts that wait for user activity
+                    page.mouse.wheel(0, 600); page.wait_for_timeout(300); page.mouse.wheel(0, -600)
+                except Exception:
+                    pass
+                nudged = True
+            if elapsed >= s.wait_seconds and (time.time() - last_change >= 2 or not found):
                 break
-            page.wait_for_timeout(1000)
-        if found:  # a second tracker (trackerId2 …) is often set a moment later
-            page.wait_for_timeout(2500)
-            found = _collect_tracker_values(context, page, s.cookie_name) or found
+            if time.time() >= hard_stop:
+                break
+            page.wait_for_timeout(700)
+        if found:
+            log(f"[{site.brand}] Tracker cookies found: " + ", ".join(
+                f'{f["exact_name"]}={unquote(f["value"])} ({f["domain"]})' for f in found))
 
         # ---- 5. Compare ----------------------------------------------------------
         prev_status = r.status
@@ -654,7 +672,9 @@ def run_checks(sites: list[Site], s: Settings, log: Callable[[str], None] = prin
     return results
 
 
-RESULT_COLUMNS = [k for k in Result.__dataclass_fields__ if k != "trackers"]
+_FIRST = ["status", "url", "search_query", "expected_id", "actual_id", "tracker_count", "match_count",
+          "all_tracker_ids", "journey", "fallback_reason", "serp_position", "http_status", "redirect_to"]
+RESULT_COLUMNS = _FIRST + [k for k in Result.__dataclass_fields__ if k not in _FIRST and k != "trackers"]
 
 
 def results_to_csv(results: list[Result]) -> str:
