@@ -468,7 +468,10 @@ async function poll(){
   if(done) $('results').innerHTML = s.results.map(r=>{
     const shot = r.screenshot ? `<a class="btn icon ghost" target="_blank" href="/shots/${encodeURIComponent(r.screenshot.split(/[\\/]/).pop())}" title="Screenshot of the page">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/></svg></a>` : '';
-    const info = (r.note || r.cookie_domain) ? `<span class="btn icon ghost" tabindex="0" title="${esc([r.note, r.cookie_domain ? 'Matched cookie: '+r.cookie_domain : ''].filter(Boolean).join('\n'))}">
+    const serpShot = r.serp_screenshot ? `<a class="btn icon ghost" target="_blank" href="/shots/${encodeURIComponent(r.serp_screenshot.split(/[\\/]/).pop())}" title="Screenshot of the Google results the tool searched">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></a>` : '';
+    const tip = [r.note, r.cookie_domain ? 'Matched cookie: '+r.cookie_domain : '', r.serp_seen ? 'Google page 1 showed: '+r.serp_seen : ''].filter(Boolean).join('\n');
+    const info = tip ? `<span class="btn icon ghost" tabindex="0" title="${esc(tip)}">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>` : '';
     const actualCls = r.actual_id ? (r.status==='MATCH' ? 'ok' : (r.status==='MISMATCH' ? 'bad' : '')) : '';
     return `<tr>
@@ -478,7 +481,7 @@ async function poll(){
       <td><span class="id">${esc(r.expected_id) || '<span class="muted">—</span>'}</span></td>
       <td>${actualCell(r, actualCls)}</td>
       <td>${journey(r)}</td>
-      <td><div class="actions">${info}${shot}</div></td></tr>`; }).join('');
+      <td><div class="actions">${info}${serpShot}${shot}</div></td></tr>`; }).join('');
   if(s.running) timer = setTimeout(poll, 1200);
 }
 

@@ -48,6 +48,8 @@ When a site sets more than one tracker ID, the result shows a **“2 IDs”** ta
 
 The tool looks at **every result on Google page 1**, not just the top one. It clicks the result that best matches your URL (the exact page, then the same site, then another subdomain of the same brand). The Journey column shows **google-click** and the result's position.
 
+Each row has a **Google results screenshot** (magnifier icon) showing exactly what the tool saw. The info icon lists the domains that were on page 1. Ads are never clicked; if the site was only shown as an ad, the row says so.
+
 **Direct fallback** (Settings → "If not clickable in Google, open site directly", on by default): if the site isn't on page 1, Google shows a CAPTCHA, the Google search fails, or the click doesn't reach the site, the URL is opened directly with a Google referrer. These rows show **direct-fallback** with the reason underneath. Treat them with care if your tracker ID depends on the traffic source.
 
 Defaults: wait **5 seconds** for the cookie; **case-sensitive matching off**.

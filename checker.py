@@ -89,6 +89,8 @@ class Result:
     fallback_reason: str = ""       # why the Google click wasn't used (shown with direct-fallback)
     serp_position: str = ""
     landing_url: str = ""
+    serp_seen: str = ""             # organic domains the tool saw on Google page 1
+    serp_screenshot: str = ""       # screenshot of the Google results page
     http_status: str = ""           # status of the URL as entered (e.g. 200, 301)
     redirect_to: str = ""           # final URL if it redirected
     http_chain: str = ""            # e.g. "301 https://a → 200 https://b"
@@ -255,29 +257,54 @@ def _registrable(host: str) -> str:
     return ".".join(labels[-2:])
 
 
-_COLLECT_SERP_JS = """() => {
-  const root = document.querySelector('#rso') || document.querySelector('#search') || document.querySelector('#center_col') || document.body;
+_COLLECT_SERP_JS = r"""() => {
+  const root = document.querySelector('#center_col') || document.querySelector('#rcnt') || document.querySelector('#main') || document.body;
+  const AD = '#tads, #tadsb, #bottomads, #tvcap, [data-text-ad], [aria-label="Ads"], [aria-label="Sponsored"], .commercial-unit-desktop-top';
   const out = []; let pos = 0; const seen = new Set();
   root.querySelectorAll('a[href]').forEach((a, i) => {
     const href = a.href || '';
     if (!/^https?:/i.test(href)) return;
     let host = ''; try { host = new URL(href).hostname; } catch (e) { return; }
-    const isGoogle = /(^|\\.)google\\.[a-z.]+$/i.test(host) || /googleusercontent|gstatic|youtube\\.com\\/redirect/i.test(href);
-    const r = a.getBoundingClientRect();
-    if (!r.width || !r.height) return;              // hidden
-    const main = !!a.querySelector('h3');           // a result's title link
+    const isGoogle = /(^|\.)google\.[a-z.]+$/i.test(host) && !/\/url\?/.test(href);
+    if (isGoogle || /googleusercontent|gstatic|googleadservices|doubleclick/i.test(host)) {
+      if (!/googleadservices|doubleclick/i.test(host)) return;
+    }
+    const visible = a.checkVisibility ? a.checkVisibility() : a.getClientRects().length > 0;
+    if (!visible) return;
+    const ad = !!a.closest(AD) || /googleadservices|doubleclick|[?&](gclid|gad_source)=/i.test(href);
+    const main = !ad && !!(a.querySelector('h3') || a.querySelector('[role="heading"]'));
     if (main && !seen.has(href)) { seen.add(href); pos += 1; }
     a.setAttribute('data-tc-i', String(i));
-    out.push({i, href, main, pos: main ? pos : null, near: pos, google: isGoogle && !/\\/url\\?/.test(href)});
+    out.push({i, href, main, ad, pos: main ? pos : null, near: pos});
   });
   return out;
 }"""
 
 
+def _prepare_serp(page):
+    """Give Google time to finish rendering page 1 and make lazily drawn parts appear."""
+    try:
+        page.wait_for_selector("#rso a, #search a, #center_col a", timeout=15000)
+    except PWTimeout:
+        pass
+    try:
+        page.wait_for_load_state("networkidle", timeout=6000)
+    except PWTimeout:
+        pass
+    try:  # scroll down in steps (not to the very end, so page 2 isn't loaded) and back to the top
+        for _ in range(4):
+            page.mouse.wheel(0, 700)
+            page.wait_for_timeout(300)
+        page.evaluate("window.scrollTo(0, 0)")
+        page.wait_for_timeout(400)
+    except Exception:
+        pass
+
+
 def _find_serp_result(page, site_url: str):
-    """Looks at every result on the first Google page (not just the top one) and picks the link that
-    best matches the URL: same page > same host > same brand domain (e.g. www. vs on.).
-    Returns (locator, position, href, how) or (None, None, None, "")."""
+    """Looks at every organic result on the first Google page (not just the top one) and picks the link
+    that best matches the URL: same page > same host > same brand domain (e.g. www. vs on.).
+    Ads are never clicked. Returns a dict: link, pos, href, how, seen (organic domains), in_ads."""
     want = urlparse(site_url if re.match(r"^https?://", site_url, re.I) else "https://" + site_url)
     want_host = (want.hostname or "").lower().removeprefix("www.")
     want_path = want.path.lower().rstrip("/")
@@ -286,14 +313,20 @@ def _find_serp_result(page, site_url: str):
         links = page.evaluate(_COLLECT_SERP_JS)
     except Exception:
         links = []
-    best = None
+    best, seen, in_ads = None, [], False
     for l in links:
-        if l["google"]:
-            continue
         href = _real_target(l["href"])
         p = urlparse(href)
         host = (p.hostname or "").lower().removeprefix("www.")
+        if l["main"] and host and host not in seen:
+            seen.append(host)
         if _registrable(host) != want_reg:
+            # an ad's visible URL may point elsewhere; check the landing parameter too
+            if l["ad"] and want_reg in unquote(l["href"]).lower():
+                in_ads = True
+            continue
+        if l["ad"]:
+            in_ads = True
             continue
         if host == want_host and p.path.lower().rstrip("/") == want_path:
             score, how = 3, "exact page"
@@ -304,12 +337,12 @@ def _find_serp_result(page, site_url: str):
         score += 0.5 if l["main"] else 0             # prefer the result title over a small sitelink
         if best is None or score > best[0]:
             best = (score, l, href, how)
-    if not best:
-        return None, None, None, ""
-    _, l, href, how = best
-    loc = page.locator(f'[data-tc-i="{l["i"]}"]').first
-    pos = l["pos"] or l["near"] or None
-    return loc, pos, href, how + ("" if l["main"] else ", sitelink")
+    res = {"link": None, "pos": None, "href": None, "how": "", "seen": seen[:10], "in_ads": in_ads}
+    if best:
+        _, l, href, how = best
+        res.update(link=page.locator(f'[data-tc-i="{l["i"]}"]').first, pos=l["pos"] or l["near"] or None,
+                   href=href, how=how + ("" if l["main"] else ", sitelink"))
+    return res
 
 
 def _tracker_name_re(cookie_name: str):
@@ -422,11 +455,13 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
                     r.status, r.fallback_reason = "CAPTCHA", "Google showed a CAPTCHA"
 
             if r.status != "CAPTCHA":
-                try:
-                    page.wait_for_selector("#search, #rso", timeout=15000)
-                except PWTimeout:
-                    pass
-                link, pos, href, how = _find_serp_result(page, site.url)
+                _prepare_serp(page)
+                serp_shot = _save_shot(page, s, site, "google")
+                if serp_shot:
+                    r.serp_screenshot = serp_shot
+                found_r = _find_serp_result(page, site.url)
+                link, pos, href, how = found_r["link"], found_r["pos"], found_r["href"], found_r["how"]
+                r.serp_seen = ", ".join(found_r["seen"])
                 if link:
                     r.serp_position = str(pos) if pos else ""
                     log(f"[{site.brand}] Found it on Google page 1 (position {r.serp_position or '?'}, {how}): {href}")
@@ -461,8 +496,14 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
                         r.fallback_reason = f"Clicking the Google result ended on {page.url}"
                 else:
                     r.status = "NOT_IN_SERP"
-                    r.fallback_reason = "Not found on Google page 1"
-                    log(f"[{site.brand}] {domain} not found on page 1 of Google for “{site.query}”")
+                    if found_r["in_ads"]:
+                        r.fallback_reason = "Only shown as a Google ad on page 1 (ads aren't clicked)"
+                    elif not found_r["seen"]:
+                        r.fallback_reason = "Google page 1 showed no readable results"
+                    else:
+                        r.fallback_reason = "Not found on Google page 1"
+                    log(f"[{site.brand}] {r.fallback_reason} for “{site.query}”. "
+                        f"Page 1 organic results: {r.serp_seen or 'none'}")
         except Exception as e:
             r.fallback_reason = f"Google search failed ({type(e).__name__})"
             log(f"[{site.brand}] {r.fallback_reason}: {str(e).splitlines()[0][:160]}")
@@ -565,6 +606,18 @@ def check_site(browser, site: Site, s: Settings, log: Callable[[str], None] = pr
             pass
         context.close()
     return r
+
+
+def _save_shot(page, s: Settings, site: Site, suffix: str = "") -> str:
+    try:
+        os.makedirs(s.screenshots_dir, exist_ok=True)
+        base = f"{site.domain}-{urlparse(site.url if '://' in site.url else 'https://' + site.url).path}"
+        fn = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") + (f"-{suffix}" if suffix else "") + ".png"
+        path = os.path.join(s.screenshots_dir, fn)
+        page.screenshot(path=path, full_page=bool(suffix))
+        return path
+    except Exception:
+        return ""
 
 
 def launch_browser(p, s: Settings):
