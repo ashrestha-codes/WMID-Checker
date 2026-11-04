@@ -125,6 +125,108 @@ def version():
         return "dev"
 
 
+# --------------------------------------------------------------------------- #
+# In-app updates (from the GitHub repo named in update_source.txt)
+# --------------------------------------------------------------------------- #
+
+def _local_version():
+    try:
+        return open(os.path.join(BASE, "VERSION")).read().strip()
+    except OSError:
+        return "0"
+
+
+def _repo():
+    try:
+        return open(os.path.join(BASE, "update_source.txt")).read().strip()
+    except OSError:
+        return ""
+
+
+def _download(url, dest=None, timeout=30):
+    """Uses the Mac's built-in curl (it has working certificates); falls back to urllib."""
+    import subprocess
+    import urllib.request
+    try:
+        args = ["curl", "-fsSL", "--max-time", str(timeout), url] + (["-o", dest] if dest else [])
+        out = subprocess.run(args, capture_output=True, check=True)
+        return out.stdout
+    except Exception:
+        data = urllib.request.urlopen(url, timeout=timeout).read()
+        if dest:
+            open(dest, "wb").write(data)
+        return data
+
+
+def _vtuple(v):
+    return tuple(int(x) if x.isdigit() else 0 for x in v.strip().split("."))
+
+
+@app.get("/api/update/check")
+def update_check():
+    repo, local = _repo(), _local_version()
+    if not repo:
+        return jsonify(local=local, latest=None, available=False, error="Updates are turned off.")
+    try:
+        import time
+        latest = _download(f"https://raw.githubusercontent.com/{repo}/main/VERSION?t={int(time.time())}",
+                           timeout=10).decode().strip()
+    except Exception as e:
+        return jsonify(local=local, latest=None, available=False, error=f"Couldn't reach GitHub ({e}).")
+    return jsonify(local=local, latest=latest, available=_vtuple(latest) > _vtuple(local))
+
+
+def _restart():
+    import sys
+    import time
+    time.sleep(1.0)
+    os.environ["NO_BROWSER"] = "1"  # the page is already open; it reloads itself
+    os.execv(sys.executable, [sys.executable, os.path.join(BASE, "app.py")])
+
+
+@app.post("/api/update")
+def update_now():
+    import shutil
+    import subprocess
+    import sys
+    import tempfile
+    import zipfile
+    if state["running"]:
+        return jsonify(error="Wait for the current check to finish (or Stop it) before updating."), 409
+    repo = _repo()
+    if not repo:
+        return jsonify(error="Updates are turned off (update_source.txt is empty)."), 400
+    tmp = tempfile.mkdtemp()
+    try:
+        zpath = os.path.join(tmp, "u.zip")
+        _download(f"https://github.com/{repo}/archive/refs/heads/main.zip", dest=zpath, timeout=60)
+        with zipfile.ZipFile(zpath) as z:
+            z.extractall(tmp)
+        src = next(os.path.join(tmp, d) for d in os.listdir(tmp) if os.path.isdir(os.path.join(tmp, d)))
+        old_req = open(os.path.join(BASE, "requirements.txt")).read() if os.path.exists(
+            os.path.join(BASE, "requirements.txt")) else ""
+        for root, dirs, files in os.walk(src):
+            rel = os.path.relpath(root, src)
+            os.makedirs(os.path.join(BASE, rel), exist_ok=True)
+            for f in files:
+                shutil.copy2(os.path.join(root, f), os.path.join(BASE, rel, f))
+        try:
+            os.chmod(os.path.join(BASE, "start-mac.command"), 0o755)
+        except OSError:
+            pass
+        new_req = open(os.path.join(BASE, "requirements.txt")).read()
+        if new_req != old_req:
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r",
+                            os.path.join(BASE, "requirements.txt")], check=False)
+        version = _local_version()
+    except Exception as e:
+        return jsonify(error=f"Update failed: {type(e).__name__}: {e}"), 500
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    threading.Thread(target=_restart, daemon=True).start()
+    return jsonify(ok=True, version=version)
+
+
 @app.get("/")
 def index():
     return send_from_directory(BASE, "ui.html")
